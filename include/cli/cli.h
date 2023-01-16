@@ -46,9 +46,10 @@
 #include <iostream>
 #include <utility>
 
+#include "mechsimtypes.h"
+
 namespace cli
 {
-
     // ********************************************************************
 
     template < typename T > struct TypeDesc { static const char* Name() { return ""; } };
@@ -69,6 +70,16 @@ namespace cli
     template <> struct TypeDesc< bool > { static const char* Name() { return "<bool>"; } };
     template <> struct TypeDesc< std::string > { static const char* Name() { return "<string>"; } };
     template <> struct TypeDesc< std::vector<std::string> > { static const char* Name() { return "<list of strings>"; } };
+
+    template <typename T> struct TypeDesc<ObjParam<T>>
+    {
+        static std::string Name()
+        {
+            std::stringstream str;
+            str << Style::Object() << typeid(T).name() << reset;
+            return str.str();
+        }
+    };
 
     // ********************************************************************
 
@@ -220,6 +231,13 @@ namespace cli
     class Command
     {
     public:
+        enum class ValidationResult
+        {
+            NoMatch,
+            Match,
+            Invalid
+        };
+
         explicit Command(std::string _name) : name(std::move(_name)), enabled(true) {}
         virtual ~Command() noexcept = default;
 
@@ -231,6 +249,7 @@ namespace cli
 
         virtual void Enable() { enabled = true; }
         virtual void Disable() { enabled = false; }
+        virtual ValidationResult Validate(const std::vector<std::string>& cmdLine) = 0;
         virtual bool Exec(const std::vector<std::string>& cmdLine, CliSession& session) = 0;
         virtual void Help(std::ostream& out) const = 0;
         // Returns the collection of completions relatives to this command.
@@ -442,6 +461,12 @@ namespace cli
             return c;
         }
 
+        ValidationResult Validate(const std::vector<std::string>& cmdLine) override
+        {
+            // Always match/follow menus
+            return ValidationResult::Match;
+        }
+
         bool Exec(const std::vector<std::string>& cmdLine, CliSession& session) override
         {
             if (!IsEnabled())
@@ -468,11 +493,31 @@ namespace cli
         {
             if (!IsEnabled())
                 return false;
-            for (auto& cmd: *cmds)
-                if (cmd->Exec(cmdLine, session))
+            for (auto& cmd : *cmds)
+            {
+                auto validationResult = cmd->Validate(cmdLine);
+                if (validationResult == Command::ValidationResult::Invalid)
+                {
+                    session.OutStream() << "Invalid parameters.\n";
+                    cmd->Help(session.OutStream());
+
+                    // Command was found, execution just failed
                     return true;
+                }
+                else if (validationResult == Command::ValidationResult::NoMatch)
+                {
+                    continue;
+                }
+
+                if (cmd->Exec(cmdLine, session))
+                {
+                    return true;
+                }
+            }
             return (parent && parent->Exec(cmdLine, session));
         }
+
+        //bool ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session)
 
         std::string Prompt() const
         {
@@ -552,6 +597,14 @@ namespace cli
     };
 
     // ********************************************************************
+    template<typename Target, typename ListHead, typename... ListTails>
+    constexpr size_t getTypeIndexInTemplateList()
+    {
+        if constexpr (std::is_same<Target, ListHead>::value)
+            return 0;
+        else
+            return 1 + getTypeIndexInTemplateList<Target, ListTails...>();
+    }
 
     template <typename ... Args>
     struct Select;
@@ -560,13 +613,34 @@ namespace cli
     struct Select<P, Args...>
     {
         template <typename F, typename InputIt>
-        static void Exec(const F& f, InputIt first, InputIt last)
+        static bool Exec(std::ostream& out, const F& f, InputIt first, InputIt last,
+            const std::vector<std::string>& parmDescs, size_t i)
         {
             assert( first != last );
             assert( std::distance(first, last) == 1+sizeof...(Args) );
             const P p = detail::from_string<typename std::decay<P>::type>(*first);
             auto g = [&](auto ... pars){ f(p, pars...); };
-            Select<Args...>::Exec(g, std::next(first), last);
+            return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
+        }
+    };
+
+    template <typename P, typename ... Args>
+    struct Select<ObjParam<P>, Args...>
+    {
+        template <typename F, typename InputIt>
+        static bool Exec(std::ostream& out, const F& f, InputIt first, InputIt last,
+            const std::vector<std::string>& parmDescs, size_t i)
+        {
+            assert(first != last);
+            assert(std::distance(first, last) == 1 + sizeof...(Args));
+            ObjParam<P> objParam;
+            if (!objParam.Create(out, "param", *first))
+            {
+                return false;
+            }
+
+            auto g = [&](auto ... pars) { f(objParam, pars...); };
+            return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
         }
     };
 
@@ -574,7 +648,8 @@ namespace cli
     struct Select<>
     {
         template <typename F, typename InputIt>
-        static void Exec(const F& f, InputIt first, InputIt last)
+        static bool Exec(std::ostream& out, const F& f, InputIt first, InputIt last,
+            const std::vector<std::string>& parmDescs, size_t i)
         {
             // silence the unused warning in release mode when assert is disabled
             static_cast<void>(first);
@@ -583,6 +658,7 @@ namespace cli
             assert(first == last);
             
             f();
+            return true;
         }
     };
 
@@ -594,8 +670,24 @@ namespace cli
     {
         static void Dump(std::ostream& out)
         {
-            out << " " << TypeDesc< typename std::decay<P>::type >::Name();
+            out << TypeDesc< typename std::decay<P>::type >::Name();
             PrintDesc<Args...>::Dump(out);
+        }
+
+        static void Dump(std::ostream& out, const std::vector<std::string>& parmDescs, size_t i = 0)
+        {
+            out << Style::Parameter()
+                << TypeDesc< typename std::decay<P>::type >::Name()
+                << reset
+                << " "
+                << parmDescs[i];
+
+            if (i != parmDescs.size() - 1)
+            {
+                out << ", ";
+            }
+
+            PrintDesc<Args...>::Dump(out, parmDescs, i + 1);
         }
     };
 
@@ -603,6 +695,7 @@ namespace cli
     struct PrintDesc<>
     {
         static void Dump(std::ostream& /*out*/) {}
+        static void Dump(std::ostream& out, const std::vector<std::string>& parmDescs, size_t i = 0) {}
     };
 
     // *******************************************
@@ -625,17 +718,40 @@ namespace cli
         {
         }
 
+        ValidationResult Validate(const std::vector<std::string>& cmdLine) override
+        {
+            if (!IsEnabled()) return ValidationResult::NoMatch;
+            assert(!cmdLine.empty());
+            if (Name() != cmdLine[0])
+            {
+                return ValidationResult::NoMatch;
+            }
+
+            const std::size_t paramSize = sizeof...(Args);
+            if (cmdLine.size() != paramSize + 1)
+            {
+                return ValidationResult::Invalid;
+            }
+
+            return ValidationResult::Match;
+        }
+
         bool Exec(const std::vector< std::string >& cmdLine, CliSession& session) override
         {
             if (!IsEnabled()) return false;
             const std::size_t paramSize = sizeof...(Args);
-            if (cmdLine.size() != paramSize+1) return false;
+            if (cmdLine.size() != paramSize + 1)
+            {
+                return false;
+            }
+
             if (Name() == cmdLine[0])
             {
                 try
                 {
                     auto g = [&](auto ... pars){ func( session.OutStream(), pars... ); };
-                    Select<Args...>::Exec(g, std::next(cmdLine.begin()), cmdLine.end());
+                    Select<Args...>::Exec(session.OutStream(), g, std::next(cmdLine.begin()), cmdLine.end(),
+                        parameterDesc, 0);
                 }
                 catch (std::bad_cast&)
                 {
@@ -649,12 +765,13 @@ namespace cli
         void Help(std::ostream& out) const override
         {
             if (!IsEnabled()) return;
-            out << " - " << Name();
+            out << "Command: " << Style::Command() << Name() << reset << " (";
             if (parameterDesc.empty())
                 PrintDesc<Args...>::Dump(out);
-            for (auto& s: parameterDesc)
-                out << " <" << s << '>';
-            out << "\n\t" << description << "\n";
+            else
+                PrintDesc<Args...>::Dump(out, parameterDesc);
+
+            out << ")\n\t" << description << "\n";
         }
 
     private:
@@ -683,6 +800,19 @@ namespace cli
         {
         }
 
+        ValidationResult Validate(const std::vector<std::string>& cmdLine, std::string& error) override
+        {
+            if (!IsEnabled()) return ValidationResult::NoMatch;
+            
+            assert(!cmdLine.empty());
+            if (Name() != cmdLine[0])
+            {
+                return ValidationResult::NoMatch;
+            }
+
+            return ValidationResult::Match;
+        }
+
         bool Exec(const std::vector< std::string >& cmdLine, CliSession& session) override
         {
             if (!IsEnabled()) return false;
@@ -697,11 +827,13 @@ namespace cli
         void Help(std::ostream& out) const override
         {
             if (!IsEnabled()) return;
-            out << " - " << Name();
+            out << "Command: " << Style::Command() << Name() << reset;
             if (parameterDesc.empty())
-                PrintDesc<std::vector<std::string>>::Dump(out);            
-            for (auto& s: parameterDesc)
-                out << " <" << s << '>';
+                PrintDesc<std::vector<std::string>>::Dump(out);
+            else
+                PrintDesc<std::vector<std::string>>::Dump(out, parameterDesc);
+            //for (auto& s: parameterDesc)
+            //    out << " <" << s << '>';
             out << "\n\t" << description << "\n";
         }
 
@@ -765,7 +897,7 @@ namespace cli
             if (!found) found = current->ScanCmds(strs, *this);
 
             if (!found) // error msg if not found
-                out << "wrong command: " << cmd << '\n';
+                out << "Command '" << strs[0] << "' not found.\n";
         }
         catch(const std::exception& e)
         {

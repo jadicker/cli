@@ -45,6 +45,35 @@ enum AfterPrompt { afterPrompt };
 enum BeforeInput { beforeInput };
 enum AfterInput { afterInput };
 
+enum Reset { reset };
+
+template<typename ColorEnumT>
+struct StyleHelper
+{
+    StyleHelper(ColorEnumT inColor, detail::rang::style inStyle = detail::rang::style::reset)
+        : color(inColor)
+        , style(inStyle)
+    {
+    }
+
+    ColorEnumT color;
+    detail::rang::style style = detail::rang::style::reset;
+};
+
+namespace Style
+{
+    using FGColor = StyleHelper<detail::rang::fg>;  
+    
+    FGColor Command() { return FGColor(detail::rang::fg::gray, detail::rang::style::italic); }
+    FGColor Parameter() { return FGColor(detail::rang::fg::cyan); }
+    FGColor ObjectId() { return FGColor(detail::rang::fg::green); }
+    FGColor Object() { return FGColor(detail::rang::fg::cyan); }
+    FGColor Mech() { return FGColor(detail::rang::fg::yellow); }
+
+    FGColor Green() { return FGColor(detail::rang::fg::green); }
+    FGColor Red() { return FGColor(detail::rang::fg::red); }
+}
+
 inline std::ostream& operator<<(std::ostream& os, BeforePrompt)
 {
     if ( Color() ) { os << detail::rang::control::forceColor << detail::rang::fg::green << detail::rang::style::bold; }
@@ -64,6 +93,31 @@ inline std::ostream& operator<<(std::ostream& os, BeforeInput)
 }
 
 inline std::ostream& operator<<(std::ostream& os, AfterInput)
+{
+    os << detail::rang::style::reset;
+    return os;
+}
+
+template<typename ColorEnumT>
+inline std::ostream& operator<<(std::ostream& os, StyleHelper<ColorEnumT> style)
+{
+    if (!Color())
+        return os;
+
+    if (style.color != ColorEnumT::reset)
+    {
+        os << detail::rang::control::forceColor << style.color;
+    }
+
+    if (style.style != detail::rang::style::reset)
+    {
+        os << style.style;
+    }
+
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, Reset)
 {
     os << detail::rang::style::reset;
     return os;
