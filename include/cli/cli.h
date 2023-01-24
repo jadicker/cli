@@ -120,7 +120,7 @@ namespace cli
     };
     
     // forward declarations
-    class Menu;
+    class Command;
     class CliSession;
 
     class Cli
@@ -148,7 +148,7 @@ namespace cli
          * 
          * However, you can develop your own, just derive a class from @c HistoryStorage .
          */
-        Cli(std::unique_ptr<Menu> _rootMenu, std::unique_ptr<HistoryStorage> historyStorage = std::make_unique<VolatileHistoryStorage>()) :
+        Cli(std::unique_ptr<Command> _rootMenu, std::unique_ptr<HistoryStorage> historyStorage = std::make_unique<VolatileHistoryStorage>()) :
             globalHistoryStorage(std::move(historyStorage)),
             rootMenu(std::move(_rootMenu)),
             exitAction{}
@@ -193,7 +193,7 @@ namespace cli
             return s;
         }
 
-        Menu* RootMenu() { return rootMenu.get(); }
+        Command* RootMenu() { return rootMenu.get(); }
 
         void ExitAction( std::ostream& out )
         {
@@ -221,12 +221,39 @@ namespace cli
 
     private:
         std::unique_ptr<HistoryStorage> globalHistoryStorage;
-        std::unique_ptr<Menu> rootMenu; // just to keep it alive
+        std::unique_ptr<Command> rootMenu; // just to keep it alive
         std::function<void(std::ostream&)> exitAction;
         std::function<void(std::ostream&, const std::string& cmd, const std::exception& )> exceptionHandler;
     };
 
     // ********************************************************************
+
+    class Command;
+
+    // free utility function to get completions from a list of commands and the current line
+    inline std::vector<std::string> GetCompletions(
+        const std::shared_ptr<std::vector<std::shared_ptr<Command>>>& cmds,
+        const std::string& currentLine)
+    {
+        std::vector<std::string> result;
+        std::for_each(cmds->begin(), cmds->end(),
+            [&currentLine, &result](const auto& cmd)
+            {
+                auto c = cmd->GetCompletionRecursive(currentLine);
+        result.insert(
+            result.end(),
+            std::make_move_iterator(c.begin()),
+            std::make_move_iterator(c.end())
+        );
+            }
+        );
+        return result;
+    }
+
+    // ********************************************************************
+
+
+    class CmdHandler;
 
     class Command
     {
@@ -238,7 +265,8 @@ namespace cli
             Invalid
         };
 
-        explicit Command(std::string _name) : name(std::move(_name)), enabled(true) {}
+        Command() : enabled(true), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
+        explicit Command(std::string _name) : name(std::move(_name)), enabled(true), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
         virtual ~Command() noexcept = default;
 
         // disable copy and move semantics
@@ -249,48 +277,160 @@ namespace cli
 
         virtual void Enable() { enabled = true; }
         virtual void Disable() { enabled = false; }
-        virtual ValidationResult Validate(const std::vector<std::string>& cmdLine) = 0;
-        virtual bool Exec(const std::vector<std::string>& cmdLine, CliSession& session) = 0;
-        virtual void Help(std::ostream& out) const = 0;
+
+        bool HasChildren() const { return cmds && !cmds->empty(); }
+
+        void AddCommands(const Command& other)
+        {
+            assert(other.cmds);
+            const auto& otherCmds = *other.cmds;
+            std::copy(otherCmds.begin(), otherCmds.end(), cmds->end());
+        }
+
+        void TransferRootCommands(Command& other)
+        {
+            assert(other.cmds && cmds);
+            auto& otherCmds = *other.cmds;
+            for (auto iter = otherCmds.begin(); iter != otherCmds.end();)
+            {
+                if (!dynamic_cast<const Command*>(iter->get()))
+                {
+                    cmds->push_back(*iter);
+                    iter = otherCmds.erase(iter);
+                    continue;
+                }
+
+                ++iter;
+            }
+        }
+
+        virtual ValidationResult Validate(const std::vector<std::string>& cmdLine)
+        {
+            // Always match/follow menus
+            return ValidationResult::Match;
+        }
+
+        virtual bool Exec(const std::vector<std::string>& cmdLine, CliSession& session);
+
+        bool ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session);
+
+        std::string Prompt() const
+        {
+            return Name();
+        }
+
+        Command* GetParent() const { return parent; }
+
+        void MainHelp(std::ostream& out)
+        {
+            if (!IsEnabled()) return;
+            for (const auto& cmd : *cmds)
+                cmd->Help(out);
+            if (parent != nullptr)
+                parent->Help(out);
+        }
+
+        virtual void Help(std::ostream& out) const
+        {
+            if (!IsEnabled()) return;
+            out << " - " << Name() << "\n\t" << description << "\n";
+        }
+
+        // returns:
+        // - the completions of this menu command
+        // - the recursive completions of subcommands
+        // - the recursive completions of parent menu
+        std::vector<std::string> GetCompletions(const std::string& currentLine) const
+        {
+            auto result = cli::GetCompletions(cmds, currentLine);
+            if (parent != nullptr)
+            {
+                auto c = parent->GetCompletionRecursive(currentLine);
+                result.insert(result.end(), std::make_move_iterator(c.begin()), std::make_move_iterator(c.end()));
+            }
+            return result;
+        }
+
         // Returns the collection of completions relatives to this command.
         // For simple commands, provides a base implementation that use the name of the command
         // for aggregate commands (i.e., Menu), the function is redefined to give the menu command
         // and the subcommand recursively
+        // returns:
+        // - the completion of this menu command
+        // - the recursive completions of the subcommands
         virtual std::vector<std::string> GetCompletionRecursive(const std::string& line) const
         {
-            if (!enabled) return {};
-            if (name.rfind(line, 0) == 0) return {name}; // name starts_with line
+            if (!enabled) { return {}; }
+
+            if (line.find(Name(), 0) == 0) // line starts_with Name()
+            {
+                auto rest = line;
+                rest.erase(0, Name().size());
+                // trim_left(rest);
+                rest.erase(rest.begin(), std::find_if(rest.begin(), rest.end(), [](int ch) { return !std::isspace(ch); }));
+                std::vector<std::string> result;
+                for (const auto& cmd : *cmds)
+                {
+                    auto cs = cmd->GetCompletionRecursive(rest);
+                    for (const auto& c : cs)
+                        result.push_back(Name() + ' ' + c); // concat submenu with command
+                }
+
+                if (!result.empty())
+                {
+                    return result;
+                }
+
+                return { Name() };
+            }
+
             return {};
         }
+
+        template <typename F>
+        CmdHandler Insert(const std::string& cmdName, F f, const std::string& help = "")
+        {
+            // dispatch to private Insert methods
+            return Insert(cmdName, help, {}, f, &F::operator());
+        }
+
+        template <typename F>
+        CmdHandler Insert(const std::string& cmdName, const std::vector<std::string>& parDesc, F f, const std::string& help = "")
+        {
+            // dispatch to private Insert methods
+            return Insert(cmdName, help, parDesc, f, &F::operator());
+        }
+
+        CmdHandler Insert(std::unique_ptr<Command>&& cmd);
+
+        CmdHandler Insert(std::string&& menuName);
+
     protected:
         const std::string& Name() const { return name; }
         bool IsEnabled() const { return enabled; }
+
     private:
         const std::string name;
         bool enabled;
+
+        template <typename F, typename R, typename ... Args>
+        CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, Args...) const);
+
+        template <typename F, typename R>
+        CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, const std::vector<std::string>&) const);
+
+        template <typename F, typename R>
+        CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, std::vector<std::string>) const);
+
+        CmdHandler Insert(const std::string& name, const std::string& help);
+
+        Command* parent{ nullptr };
+        const std::string description;
+        // using shared_ptr instead of unique_ptr to get a weak_ptr
+        // for the CmdHandler::Descriptor
+        using Cmds = std::vector<std::shared_ptr<Command>>;
+        std::shared_ptr<Cmds> cmds;
     };
-
-    // ********************************************************************
-
-    // free utility function to get completions from a list of commands and the current line
-    inline std::vector<std::string> GetCompletions(
-        const std::shared_ptr<std::vector<std::shared_ptr<Command>>>& cmds,
-        const std::string& currentLine)
-    {
-        std::vector<std::string> result;
-        std::for_each(cmds->begin(), cmds->end(),
-            [&currentLine,&result](const auto& cmd)
-            {
-                auto c = cmd->GetCompletionRecursive(currentLine);
-                result.insert(
-                    result.end(),
-                    std::make_move_iterator(c.begin()),
-                    std::make_move_iterator(c.end())
-                );
-            }
-        );
-        return result;
-    }
 
     // ********************************************************************
 
@@ -311,22 +451,13 @@ namespace cli
 
         void Prompt();
 
-        void Current(Menu* menu) { current = menu; }
+        void Current(Command* menu) { current = menu; }
 
         std::ostream& OutStream() { return out; }
 
         void Help() const;
 
-        void Exit()
-        {
-            exitAction(out);
-            cli.ExitAction(out);
-
-            auto cmds = history.GetCommands();
-            cli.StoreCommands(cmds);
-
-            exit = true; // prevent the prompt to be shown
-        }
+        void Exit();
 
         void ExitAction(const std::function<void(std::ostream&)>& action)
         {
@@ -348,11 +479,10 @@ namespace cli
         std::vector<std::string> GetCompletions(std::string currentLine) const;
 
     private:
-
         Cli& cli;
         std::shared_ptr<cli::OutStream> coutPtr;
-        Menu* current;
-        std::unique_ptr<Menu> globalScopeMenu;
+        Command* current;
+        std::unique_ptr<Command> globalScopeMenu;
         std::ostream& out;
         std::function< void(std::ostream&)> exitAction = []( std::ostream& ){};
         detail::History history;
@@ -372,6 +502,14 @@ namespace cli
         void Enable() { if (descriptor) descriptor->Enable(); }
         void Disable() { if (descriptor) descriptor->Disable(); }
         void Remove() { if (descriptor) descriptor->Remove(); }
+
+        Command* operator->()
+        {
+            if (auto c = descriptor->cmd.lock())
+                return c.get();
+
+            return nullptr;
+        }
     private:
         struct Descriptor
         {
@@ -411,192 +549,6 @@ namespace cli
     };
 
     // ********************************************************************
-
-    class Menu : public Command
-    {
-    public:
-        // disable value and move semantics
-        Menu(const Menu&) = delete;
-        Menu& operator = (const Menu&) = delete;
-        Menu(Menu&&) = delete;
-        Menu& operator = (Menu&&) = delete;
-
-        Menu() : Command({}), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
-
-        explicit Menu(const std::string& _name, std::string  desc = "(menu)") :
-            Command(_name), parent(nullptr), description(std::move(desc)), cmds(std::make_shared<Cmds>())
-        {}
-
-        template <typename R, typename ... Args>
-        CmdHandler Insert(const std::string& cmdName, R (*f)(std::ostream&, Args...), const std::string& help, const std::vector<std::string>& parDesc={});
-        
-        template <typename F>
-        CmdHandler Insert(const std::string& cmdName, F f, const std::string& help = "", const std::vector<std::string>& parDesc={})
-        {
-            // dispatch to private Insert methods
-            return Insert(cmdName, help, parDesc, f, &F::operator());
-        }
-
-        template <typename F>
-        CmdHandler Insert(const std::string& cmdName, const std::vector<std::string>& parDesc, F f, const std::string& help = "")
-        {
-            // dispatch to private Insert methods
-            return Insert(cmdName, help, parDesc, f, &F::operator());
-        }
-
-        CmdHandler Insert(std::unique_ptr<Command>&& cmd)
-        {
-            std::shared_ptr<Command> scmd(std::move(cmd));
-            CmdHandler c(scmd, cmds);
-            cmds->push_back(scmd);
-            return c;
-        }
-
-        CmdHandler Insert(std::unique_ptr<Menu>&& menu)
-        {
-            std::shared_ptr<Menu> smenu(std::move(menu));
-            CmdHandler c(smenu, cmds);
-            smenu->parent = this;
-            cmds->push_back(smenu);
-            return c;
-        }
-
-        ValidationResult Validate(const std::vector<std::string>& cmdLine) override
-        {
-            // Always match/follow menus
-            return ValidationResult::Match;
-        }
-
-        bool Exec(const std::vector<std::string>& cmdLine, CliSession& session) override
-        {
-            if (!IsEnabled())
-                return false;
-            if (cmdLine[0] == Name())
-            {
-                if (cmdLine.size() == 1)
-                {
-                    session.Current(this);
-                    return true;
-                }
-                else
-                {
-                    // check also for subcommands
-                    std::vector<std::string > subCmdLine(cmdLine.begin()+1, cmdLine.end());
-                    for (auto& cmd: *cmds)
-                        if (cmd->Exec( subCmdLine, session )) return true;
-                }
-            }
-            return false;
-        }
-
-        bool ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session)
-        {
-            if (!IsEnabled())
-                return false;
-            for (auto& cmd : *cmds)
-            {
-                auto validationResult = cmd->Validate(cmdLine);
-                if (validationResult == Command::ValidationResult::Invalid)
-                {
-                    session.OutStream() << "Invalid parameters.\n";
-                    cmd->Help(session.OutStream());
-
-                    // Command was found, execution just failed
-                    return true;
-                }
-                else if (validationResult == Command::ValidationResult::NoMatch)
-                {
-                    continue;
-                }
-
-                if (cmd->Exec(cmdLine, session))
-                {
-                    return true;
-                }
-            }
-            return (parent && parent->Exec(cmdLine, session));
-        }
-
-        //bool ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session)
-
-        std::string Prompt() const
-        {
-            return Name();
-        }
-
-        void MainHelp(std::ostream& out)
-        {
-            if (!IsEnabled()) return;
-            for (const auto& cmd: *cmds)
-                cmd->Help(out);
-            if (parent != nullptr)
-                parent->Help(out);
-        }
-
-        void Help(std::ostream& out) const override
-        {
-            if (!IsEnabled()) return;
-            out << " - " << Name() << "\n\t" << description << "\n";
-        }
-
-        // returns:
-        // - the completions of this menu command
-        // - the recursive completions of subcommands
-        // - the recursive completions of parent menu
-        std::vector<std::string> GetCompletions(const std::string& currentLine) const
-        {
-            auto result = cli::GetCompletions(cmds, currentLine);
-            if (parent != nullptr)
-            {
-                auto c = parent->GetCompletionRecursive(currentLine);
-                result.insert(result.end(), std::make_move_iterator(c.begin()), std::make_move_iterator(c.end()));
-            }
-            return result;
-        }
-
-        // returns:
-        // - the completion of this menu command
-        // - the recursive completions of the subcommands
-        std::vector<std::string> GetCompletionRecursive(const std::string& line) const override
-        {
-            if (line.rfind(Name(), 0) == 0) // line starts_with Name()
-            {
-                auto rest = line;
-                rest.erase(0, Name().size());
-                // trim_left(rest);
-                rest.erase(rest.begin(), std::find_if(rest.begin(), rest.end(), [](int ch) { return !std::isspace(ch); }));
-                std::vector<std::string> result;
-                for (const auto& cmd: *cmds)
-                {
-                    auto cs = cmd->GetCompletionRecursive(rest);
-                    for (const auto& c: cs)
-                        result.push_back(Name() + ' ' + c); // concat submenu with command
-                }
-                return result;
-            }
-            return Command::GetCompletionRecursive(line);
-        }
-
-    private:
-
-        template <typename F, typename R, typename ... Args>
-        CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const);
-
-        template <typename F, typename R>
-        CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, const std::vector<std::string>&) const);
-
-        template <typename F, typename R>
-        CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, std::vector<std::string>) const);
-
-        Menu* parent{ nullptr };
-        const std::string description;
-        // using shared_ptr instead of unique_ptr to get a weak_ptr
-        // for the CmdHandler::Descriptor
-        using Cmds = std::vector<std::shared_ptr<Command>>;
-        std::shared_ptr<Cmds> cmds;
-    };
-
-    // ********************************************************************
     template<typename Target, typename ListHead, typename... ListTails>
     constexpr size_t getTypeIndexInTemplateList()
     {
@@ -620,6 +572,47 @@ namespace cli
             assert( std::distance(first, last) == 1+sizeof...(Args) );
             const P p = detail::from_string<typename std::decay<P>::type>(*first);
             auto g = [&](auto ... pars){ f(p, pars...); };
+            return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
+        }
+    };
+
+    // TODO: Generalize to any Create-able with SFINAE
+    template </* typename T, */ typename ... Args>
+    struct Select<MechId, Args...>
+    {
+        template <typename F, typename InputIt>
+        static bool Exec(std::ostream& out, const F& f, InputIt first, InputIt last,
+            const std::vector<std::string>& parmDescs, size_t i)
+        {
+            assert(first != last);
+            assert(std::distance(first, last) == 1 + sizeof...(Args));
+            MechId obj;
+            if (!obj.Create(out, "param", *first))
+            {
+                return false;
+            }
+
+            auto g = [&](auto ... pars) { f(obj, pars...); };
+            return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
+        }
+    };
+
+    template </* typename T, */ typename ... Args>
+    struct Select<CircuitId, Args...>
+    {
+        template <typename F, typename InputIt>
+        static bool Exec(std::ostream& out, const F& f, InputIt first, InputIt last,
+            const std::vector<std::string>& parmDescs, size_t i)
+        {
+            assert(first != last);
+            assert(std::distance(first, last) == 1 + sizeof...(Args));
+            CircuitId obj;
+            if (!obj.Create(out, "param", *first))
+            {
+                return false;
+            }
+
+            auto g = [&](auto ... pars) { f(obj, pars...); };
             return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
         }
     };
@@ -747,15 +740,21 @@ namespace cli
 
             if (Name() == cmdLine[0])
             {
+                bool success = false;
                 try
                 {
                     auto g = [&](auto ... pars){ func( session.OutStream(), pars... ); };
-                    Select<Args...>::Exec(session.OutStream(), g, std::next(cmdLine.begin()), cmdLine.end(),
+                    success = Select<Args...>::Exec(session.OutStream(), g, std::next(cmdLine.begin()), cmdLine.end(),
                         parameterDesc, 0);
                 }
                 catch (std::bad_cast&)
                 {
                     return false;
+                }
+
+                if (success && HasChildren())
+                {
+                    session.Current(this);
                 }
                 return true;
             }
@@ -853,13 +852,16 @@ namespace cli
             cli(_cli),
             coutPtr(Cli::CoutPtr()),
             current(cli.RootMenu()),
-            globalScopeMenu(std::make_unique< Menu >()),
+            globalScopeMenu(std::make_unique< Command >()),
             out(_out),
             history(historySize)
         {
             history.LoadCommands(cli.GetCommands());
 
             coutPtr->Register(out);
+
+            globalScopeMenu->TransferRootCommands(*cli.RootMenu());
+
             globalScopeMenu->Insert(
                 "help",
                 [this](std::ostream&){ Help(); },
@@ -867,7 +869,7 @@ namespace cli
             );
             globalScopeMenu->Insert(
                 "exit",
-                [this](std::ostream&){ Exit(); },
+                [this](std::ostream&) { Exit(); },
                 "Quit the session"
             );
 #ifdef CLI_HISTORY_CMD
@@ -891,10 +893,10 @@ namespace cli
         {
 
             // global cmds check
-            bool found = globalScopeMenu->ScanCmds(strs, *this);
+            bool found = current->ScanCmds(strs, *this);
 
             // root menu recursive cmds check
-            if (!found) found = current->ScanCmds(strs, *this);
+            if (!found) found = globalScopeMenu->ScanCmds(strs, *this);
 
             if (!found) // error msg if not found
                 out << "Command '" << strs[0] << "' not found.\n";
@@ -928,6 +930,22 @@ namespace cli
         current -> MainHelp( out );
     }
 
+    void CliSession::Exit()
+    {
+        if (current = current->GetParent())
+        {
+            return;
+        }
+
+        exitAction(out);
+        cli.ExitAction(out);
+
+        auto cmds = history.GetCommands();
+        cli.StoreCommands(cmds);
+
+        exit = true; // prevent the prompt to be shown
+    }
+
     inline std::vector<std::string> CliSession::GetCompletions(std::string currentLine) const
     {
         // trim_left(currentLine);
@@ -946,31 +964,98 @@ namespace cli
 
     // Menu implementation
 
+    /*
     template <typename R, typename ... Args>
-    CmdHandler Menu::Insert(const std::string& cmdName, R (*f)(std::ostream&, Args...), const std::string& help, const std::vector<std::string>& parDesc)
+    CmdHandler Command::Insert(const std::string& cmdName, R (*f)(std::ostream&, Args...), const std::string& help, const std::vector<std::string>& parDesc)
     {
         using F = R (*)(std::ostream&, Args...);
         return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, help, parDesc));
     }
+    */
 
     template <typename F, typename R, typename ... Args>
-    CmdHandler Menu::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const )
+    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const )
     {
         return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, help, parDesc));
     }
 
     template <typename F, typename R>
-    CmdHandler Menu::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, const std::vector<std::string>& args) const )
+    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, const std::vector<std::string>& args) const )
     {
         return Insert(std::make_unique<FreeformCommand<F>>(cmdName, f, help, parDesc));
     }
 
     template <typename F, typename R>
-    CmdHandler Menu::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, std::vector<std::string> args) const )
+    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, std::vector<std::string> args) const )
     {
         return Insert(std::make_unique<FreeformCommand<F>>(cmdName, f, help, parDesc));
     }
 
+    CmdHandler Command::Insert(std::unique_ptr<Command>&& cmd)
+    {
+        std::shared_ptr<Command> scmd(std::move(cmd));
+        scmd->parent = this;
+        CmdHandler c(scmd, cmds);
+        cmds->push_back(scmd);
+        return c;
+    }
+
+    CmdHandler Command::Insert(std::string&& menuName)
+    {
+        std::shared_ptr<Command> smenu = std::make_shared<Command>(std::move(menuName));
+        CmdHandler c(smenu, cmds);
+        smenu->parent = this;
+        cmds->push_back(smenu);
+        return c;
+    }
+
+    bool Command::Exec(const std::vector<std::string>& cmdLine, CliSession& session)
+    {
+        if (!IsEnabled())
+            return false;
+        if (cmdLine[0] == Name())
+        {
+            // check also for subcommands
+            std::vector<std::string > subCmdLine(cmdLine.begin() + 1, cmdLine.end());
+            for (auto& cmd : *cmds)
+                if (cmd->Exec(subCmdLine, session)) return true;
+
+            if (HasChildren())
+            {
+                session.Current(this);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool Command::ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session)
+    {
+        if (!IsEnabled())
+            return false;
+        for (auto& cmd : *cmds)
+        {
+            auto validationResult = cmd->Validate(cmdLine);
+            if (validationResult == Command::ValidationResult::Invalid)
+            {
+                session.OutStream() << "Invalid parameters.\n";
+                cmd->Help(session.OutStream());
+
+                // Command was found, execution just failed
+                return true;
+            }
+            else if (validationResult == Command::ValidationResult::NoMatch)
+            {
+                continue;
+            }
+
+            if (cmd->Exec(cmdLine, session))
+            {
+                return true;
+            }
+        }
+        return (parent && parent->Exec(cmdLine, session));
+    }
 } // namespace cli
 
 #endif // CLI_CLI_H

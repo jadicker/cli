@@ -2,7 +2,7 @@
 
 #include "colorprofile.h"
 
-#include <typeinfo>
+#include <limits>
 
 #include "MechSim/Central/Central.h"
 #include "MechSim/Central/Mech.h"
@@ -53,7 +53,7 @@ namespace cli
 	T* GetObj(std::ostream& out, const std::string& paramName, const std::string& objectIdStr)
 	{
 		MechSim::ObjectId objectId = MechSim::ObjectId::FromString(objectIdStr);
-		auto* object = MechSim::GetObjectRegistry().GetObject(objectId);
+		auto* object = MechSim::GetObjectRegistry().Get(objectId);
 		if (!object)
 		{
 			out << "Invalid object id '" << objectIdStr << "' for '" << paramName << "'\n";
@@ -72,7 +72,7 @@ namespace cli
 	}
 
 	template <typename T>
-	class ObjParam
+	class ObjParam final
 	{
 	public:
 		T& operator*() { return *m_object; }
@@ -102,4 +102,92 @@ namespace cli
 		os << Style::Object() << typeid(T).name() << reset;
 		return os;
 	}
+
+	class Id
+	{
+	public:
+		explicit operator bool() const { return m_id != std::numeric_limits<size_t>::max(); }
+		operator size_t() const { return m_id; }
+
+		bool Create(std::ostream& out, const std::string& paramName, const std::string& idStr)
+		{
+			// TODO:
+			if (auto val = MechSim::ReadInt(idStr); val && Validate(static_cast<size_t>(*val)))
+			{
+				m_id = static_cast<size_t>(*val);
+				return true;
+			}
+			out << "Id " << idStr << " invalid\n";
+			return false;
+		}
+
+	protected:
+		virtual bool Validate(size_t id) const { return m_id != std::numeric_limits<size_t>::max(); }
+
+		size_t m_id = std::numeric_limits<size_t>::max();
+	};
+
+	class MechId : public Id
+	{
+	public:
+		/*
+		// TODO:
+		MechSim::Mech& operator*() { return *m_object; }
+		MechSim::Mech* operator->() { return m_object; }
+		*/
+
+		explicit operator bool() const { return m_id == 0; }
+
+		/*
+		bool Create(std::ostream& out, const std::string& paramName, const std::string& idStr)
+		{
+			// TODO:
+			if (auto value = MechSim::ReadInt(idStr); value == 0)
+			{
+				return true;
+			}
+			out << "Mech id " << idStr << " invalid\n";
+			return false;
+		}
+		*/
+
+		// Only call from safe contexts!
+		/*
+		// TODO:
+		MechSim::Mech& Get() { return *m_object; }
+
+		MechSim::Object* GetObj() { return dynamic_cast<MechSim::Object*>(m_object); }
+		const MechSim::Object* GetObj() const { return dynamic_cast<MechSim::Object*>(m_object); }
+		*/
+
+	//private:
+		//size_t m_id = std::numeric_limits<size_t>::max();
+
+	protected:
+		bool Validate(size_t id) const override
+		{
+			return id == 0;
+		}
+	};
+
+	class CircuitId : public Id
+	{
+
+	protected:
+		bool Validate(size_t id) const override
+		{
+			if (id == std::numeric_limits<size_t>::max())
+			{
+				return false;
+			}
+
+			const auto& mech = MechSim::GetMech();
+			if (id >= mech.m_circuits.Size())
+			{
+				return false;
+			}
+
+			return mech.m_circuits.Get(id);
+		}
+	};
 }
