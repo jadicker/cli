@@ -68,6 +68,11 @@ public:
     }
 
 private:
+    void SetPromptSize(size_t size) override
+    {
+        ih.SetPromptSize(size);
+    }
+
     detail::Keyboard kb;
     detail::InputHandler ih;
 };

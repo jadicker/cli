@@ -227,24 +227,22 @@ namespace cli
     };
 
     // ********************************************************************
-
-    class Command;
-
     // free utility function to get completions from a list of commands and the current line
     inline std::vector<std::string> GetCompletions(
         const std::shared_ptr<std::vector<std::shared_ptr<Command>>>& cmds,
-        const std::string& currentLine)
+        const std::string& currentLine,
+        size_t param)
     {
         std::vector<std::string> result;
         std::for_each(cmds->begin(), cmds->end(),
-            [&currentLine, &result](const auto& cmd)
+            [&currentLine, &result, param](const auto& cmd)
             {
-                auto c = cmd->GetCompletionRecursive(currentLine);
-        result.insert(
-            result.end(),
-            std::make_move_iterator(c.begin()),
-            std::make_move_iterator(c.end())
-        );
+                auto c = cmd->GetCompletionRecursive(currentLine, param);
+                result.insert(
+                    result.end(),
+                    std::make_move_iterator(c.begin()),
+                    std::make_move_iterator(c.end())
+                );
             }
         );
         return result;
@@ -340,12 +338,17 @@ namespace cli
         // - the completions of this menu command
         // - the recursive completions of subcommands
         // - the recursive completions of parent menu
-        std::vector<std::string> GetCompletions(const std::string& currentLine) const
+
+        std::vector<std::string> GetCompletions(const std::string& currentLine, size_t param) const
         {
-            auto result = cli::GetCompletions(cmds, currentLine);
-            if (parent != nullptr)
+            auto result = cli::GetCompletions(cmds, currentLine, param);
+
+            //auto selfComplete = GetCompletionRecursive(currentLine, param);
+            //result.insert(result.end(), std::make_move_iterator(selfComplete.begin()), std::make_move_iterator(selfComplete.end()));
+
+            if (parent != nullptr && param == 0)
             {
-                auto c = parent->GetCompletionRecursive(currentLine);
+                auto c = parent->GetCompletionRecursive(currentLine, param);
                 result.insert(result.end(), std::make_move_iterator(c.begin()), std::make_move_iterator(c.end()));
             }
             return result;
@@ -358,11 +361,11 @@ namespace cli
         // returns:
         // - the completion of this menu command
         // - the recursive completions of the subcommands
-        virtual std::vector<std::string> GetCompletionRecursive(const std::string& line) const
+        virtual std::vector<std::string> GetCompletionRecursive(const std::string& line, size_t param)
         {
             if (!enabled) { return {}; }
 
-            if (line.find(Name(), 0) == 0) // line starts_with Name()
+            if (Name().find(line) == 0) // line starts_with Name()
             {
                 auto rest = line;
                 rest.erase(0, Name().size());
@@ -371,13 +374,14 @@ namespace cli
                 std::vector<std::string> result;
                 for (const auto& cmd : *cmds)
                 {
-                    auto cs = cmd->GetCompletionRecursive(rest);
+                    auto cs = cmd->GetCompletionRecursive(rest, param);
                     for (const auto& c : cs)
                         result.push_back(Name() + ' ' + c); // concat submenu with command
                 }
 
                 if (!result.empty())
                 {
+                    result.push_back(Name());
                     return result;
                 }
 
@@ -449,7 +453,10 @@ namespace cli
 
         void Feed(const std::string& cmd);
 
-        void Prompt();
+        void Prompt()
+        {
+            SetPromptSize(PromptImpl());
+        }
 
         void Current(Command* menu) { current = menu; }
 
@@ -476,9 +483,12 @@ namespace cli
             return history.Next();
         }
 
-        std::vector<std::string> GetCompletions(std::string currentLine) const;
+        std::vector<std::string> GetCompletions(std::string currentLine, size_t param) const;
 
     private:
+        virtual void SetPromptSize(size_t size) {}
+        size_t PromptImpl();
+
         Cli& cli;
         std::shared_ptr<cli::OutStream> coutPtr;
         Command* current;
@@ -570,50 +580,71 @@ namespace cli
         {
             assert( first != last );
             assert( std::distance(first, last) == 1+sizeof...(Args) );
-            const P p = detail::from_string<typename std::decay<P>::type>(*first);
+            //const P p = detail::from_string<typename std::decay<P>::type>(*first);
+            
+            using UnqualifiedP = typename std::decay<P>::type;
+            UnqualifiedP opt;
+            if constexpr (std::is_base_of<Id, UnqualifiedP>::value)
+            {
+                // Yikes, this is goofy.  TODO: Clean this up
+                if (!opt.Id::Create(out, parmDescs[i], *first))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                opt = detail::from_string<UnqualifiedP>(*first);
+            }
+            
+            const P p = opt;
+
             auto g = [&](auto ... pars){ f(p, pars...); };
             return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
         }
     };
 
-    // TODO: Generalize to any Create-able with SFINAE
-    template </* typename T, */ typename ... Args>
-    struct Select<MechId, Args...>
+    // Zero or more template params - that is, zero
+    template <typename ...Args>
+    class ParamUtil
     {
-        template <typename F, typename InputIt>
-        static bool Exec(std::ostream& out, const F& f, InputIt first, InputIt last,
-            const std::vector<std::string>& parmDescs, size_t i)
+    public:
+        static AutoCompleter GetAutoCompleter(size_t i)
         {
-            assert(first != last);
-            assert(std::distance(first, last) == 1 + sizeof...(Args));
-            MechId obj;
-            if (!obj.Create(out, "param", *first))
-            {
-                return false;
-            }
+            return { {} };
+        }
 
-            auto g = [&](auto ... pars) { f(obj, pars...); };
-            return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
+        template <template <typename T> class Action>
+        static auto CallWith(size_t i)
+        {
+            return Action<void>::Get();
         }
     };
 
-    template </* typename T, */ typename ... Args>
-    struct Select<CircuitId, Args...>
+    // One or more template params
+    template <typename ArgCar, typename ...ArgCdr>
+    class ParamUtil<ArgCar, ArgCdr...>
     {
-        template <typename F, typename InputIt>
-        static bool Exec(std::ostream& out, const F& f, InputIt first, InputIt last,
-            const std::vector<std::string>& parmDescs, size_t i)
+    public:
+        static AutoCompleter GetAutoCompleter(size_t i)
         {
-            assert(first != last);
-            assert(std::distance(first, last) == 1 + sizeof...(Args));
-            CircuitId obj;
-            if (!obj.Create(out, "param", *first))
+            if (i > 0)
             {
-                return false;
+                return ParamUtil<ArgCdr...>::GetAutoCompleter(i - 1);
             }
 
-            auto g = [&](auto ... pars) { f(obj, pars...); };
-            return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
+            return ParamAutoComplete<ArgCar>::Get();
+        }
+
+        template <template <typename T> class Action>
+        static auto CallWith(size_t i)
+        {
+            if (i > 0)
+            {
+                return ParamUtil<ArgCdr...>::CallWith<Action>(i - 1);
+            }
+
+            return Action<ArgCar>::Get();
         }
     };
 
@@ -697,6 +728,8 @@ namespace cli
     class VariadicFunctionCommand : public Command
     {
     public:
+        static constexpr size_t INVALID_INDEX = std::numeric_limits<size_t>::max();
+
         // disable value semantics
         VariadicFunctionCommand(const VariadicFunctionCommand&) = delete;
         VariadicFunctionCommand& operator = (const VariadicFunctionCommand&) = delete;
@@ -727,6 +760,45 @@ namespace cli
             }
 
             return ValidationResult::Match;
+        }
+
+        template <typename T, size_t N>
+        std::vector<std::string> GetAutoCompleteForParam(size_t param)
+        {
+            if (param >= sizeof...(Args))
+            {
+                return {};
+            }
+            //GetParameterElement<N, Args...>()
+            //std::get<N>(std::forward_as_tuple(std::forward<Args...>()...));
+            //ObjectAutoCompleter<T> = 
+        }
+
+        std::vector<std::string> GetCompletionRecursive(const std::string& currentLine, size_t param) override
+        {
+            if (param == 0)
+            {
+                // Complete for our own name
+                return Command::GetCompletionRecursive(currentLine, param);
+            }
+
+            if constexpr (sizeof...(Args) > 0)
+            {
+                const size_t zeroIndexedParam = param - 1;
+                AutoCompleter autoCompleter = ParamUtil<Args...>::CallWith<ParamAutoComplete>(zeroIndexedParam);
+
+                if (!autoCompleter.HasValues())
+                {
+                    return {};
+                }
+                auto autoCompleteIndex = m_autoCompleteIndices[zeroIndexedParam] % autoCompleter.Size();
+                m_autoCompleteIndices[zeroIndexedParam] = autoCompleteIndex + 1;
+                return autoCompleter.GetAutoCompletions(autoCompleteIndex);
+            }
+            else
+            {
+                return {};
+            }
         }
 
         bool Exec(const std::vector< std::string >& cmdLine, CliSession& session) override
@@ -774,10 +846,11 @@ namespace cli
         }
 
     private:
-
         const F func;
         const std::string description;
         const std::vector<std::string> parameterDesc;
+
+        std::array<size_t, sizeof...(Args)> m_autoCompleteIndices = { 0 };
     };
 
 
@@ -913,14 +986,19 @@ namespace cli
         }
     }
 
-    inline void CliSession::Prompt()
+    inline size_t CliSession::PromptImpl()
     {
-        if (exit) return;
+        if (exit) return 0;
+
+        auto prompt = current->Prompt();
+        std::string suffix = "> ";
         out << beforePrompt
-            << current->Prompt()
+            << prompt
             << afterPrompt
-            << "> "
+            << suffix
             << std::flush;
+
+        return prompt.size() + suffix.size();
     }
 
     inline void CliSession::Help() const
@@ -946,33 +1024,25 @@ namespace cli
         exit = true; // prevent the prompt to be shown
     }
 
-    inline std::vector<std::string> CliSession::GetCompletions(std::string currentLine) const
+    inline std::vector<std::string> CliSession::GetCompletions(std::string currentLine, size_t param) const
     {
+
         // trim_left(currentLine);
         currentLine.erase(currentLine.begin(), std::find_if(currentLine.begin(), currentLine.end(), [](int ch) { return !std::isspace(ch); }));
-        auto v1 = globalScopeMenu->GetCompletions(currentLine);
-        auto v3 = current->GetCompletions(currentLine);
+        auto v1 = globalScopeMenu->GetCompletions(currentLine, param);
+        auto v3 = current->GetCompletions(currentLine, param);
         v1.insert(v1.end(), std::make_move_iterator(v3.begin()), std::make_move_iterator(v3.end()));
 
+        // I specifically don't want sorting for new auto-complete
         // removes duplicates (std::unique requires a sorted container)
-        std::sort(v1.begin(), v1.end());
-        auto ip = std::unique(v1.begin(), v1.end());
-        v1.resize(static_cast<std::size_t>(std::distance(v1.begin(), ip)));
+        //std::sort(v1.begin(), v1.end());
+        //auto ip = std::unique(v1.begin(), v1.end());
+        //v1.resize(static_cast<std::size_t>(std::distance(v1.begin(), ip)));
 
         return v1;
     }
 
     // Menu implementation
-
-    /*
-    template <typename R, typename ... Args>
-    CmdHandler Command::Insert(const std::string& cmdName, R (*f)(std::ostream&, Args...), const std::string& help, const std::vector<std::string>& parDesc)
-    {
-        using F = R (*)(std::ostream&, Args...);
-        return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, help, parDesc));
-    }
-    */
-
     template <typename F, typename R, typename ... Args>
     CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const )
     {

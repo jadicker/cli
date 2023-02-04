@@ -32,6 +32,7 @@
 
 #include <functional>
 #include <string>
+#include "autocomplete.h"
 #include "terminal.h"
 #include "inputdevice.h"
 #include "../cli.h" // CliSession
@@ -50,6 +51,11 @@ public:
         terminal(session.OutStream())
     {
         kb.Register( [this](auto key){ this->Keypressed(key); } );
+    }
+
+    void SetPromptSize(size_t size)
+    {
+        terminal.SetLineStart(size);
     }
 
 private:
@@ -93,10 +99,38 @@ private:
             case Symbol::tab:
             {
                 auto line = terminal.GetLine();
-                auto completions = session.GetCompletions(line);
+                size_t paramIndex = terminal.GetParamIndex(line);
+                auto completions = session.GetCompletions(line, paramIndex);
 
                 if (completions.empty())
                     break;
+
+                // This should perhaps be somehow generalized to "user typed input for this param" but
+                // for now turn on common prefix matching for top level command completion
+                if (paramIndex == 0)
+                {
+                    if (completions.size() == 1)
+                    {
+                        terminal.SetLine(completions[0] + ' ');
+                        break;
+                    }
+
+                    auto commonPrefix = CommonPrefix(completions);
+                    if (commonPrefix.size() > line.size())
+                    {
+                        terminal.SetLine(commonPrefix);
+                        break;
+                    }
+                }
+
+                std::vector<AutoCompletion> autoCompletions;
+                std::for_each(completions.begin(), completions.end(), [&autoCompletions](auto& cmd)
+                    {
+                        autoCompletions.push_back({ cmd, "" });
+                    });
+                terminal.SetCompletions(autoCompletions);
+
+#ifdef OLD_AUTOCOMPLETE
                 if (completions.size() == 1)
                 {
                     terminal.SetLine(completions[0]+' ');
@@ -114,8 +148,9 @@ private:
                 std::for_each( completions.begin(), completions.end(), [&items](auto& cmd){ items += '\t' + cmd; } );
                 session.OutStream() << items << '\n';
                 session.Prompt();
-                terminal.ResetCursor();
+                terminal.ResetInputLine();
                 terminal.SetLine( line );
+#endif
                 break;
             }
         }
