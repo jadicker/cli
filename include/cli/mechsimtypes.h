@@ -1,6 +1,7 @@
 #pragma once
 
 #include "colorprofile.h"
+#include "detail/autocomplete.h"
 
 #include <limits>
 #include <type_traits>
@@ -71,6 +72,64 @@ namespace cli
 
 		return specificObject;
 	}
+
+	class AutoCompleter
+	{
+	public:
+		using Completions = std::vector<detail::AutoCompletion>;
+
+		AutoCompleter(Completions&& completions)
+		{
+			/*
+			const auto& objects = MechSim::GetAllObjects<T>();
+			for (const auto* obj : objects)
+			{
+				m_completions.push_back(detail::from_string<T>(*m_objects[i]))
+			}
+			*/
+			m_completions = std::move(completions);
+			m_current = 0;
+		}
+
+		bool HasValues() const { return !m_completions.empty(); }
+		size_t Size() const { return m_completions.size(); }
+
+		const detail::AutoCompletion* Current()
+		{
+			if (!HasValues()) { return {}; }
+			return &m_completions[m_current];
+		}
+
+		// Peek 0 returns the next element.  Wraps around, but returns nullptr when i >= size() -1
+		const detail::AutoCompletion* Peek(size_t i)
+		{
+			const size_t size = Size();
+			if (i >= size - 1)
+			{
+				return nullptr;
+			}
+
+			return &m_completions[(m_current + 1 + i) % size];
+		}
+
+		Completions GetAutoCompletions(size_t cur) const
+		{
+			size_t count = m_completions.size();
+			Completions completions;
+			completions.reserve(count);
+			completions.push_back(m_completions[cur]);
+
+			for (size_t i = (cur + 1) % count; i != cur; i = (i + 1) % count)
+			{
+				completions.push_back(m_completions[i]);
+			}
+			return completions;
+		}
+
+	private:
+		size_t m_current;
+		Completions m_completions;
+	};
 
 	// TODO: Maybe push towards the version with error reporting
 	template <typename T>
@@ -167,12 +226,12 @@ namespace cli
 			return MechId();
 		}
 
-		static std::vector<std::string> GetCompletions()
+		static AutoCompleter::Completions GetCompletions()
 		{
-			std::vector<std::string> results;
+			AutoCompleter::Completions results;
 			for (const auto& mech : MechSim::Game::GetInstance().m_shop.GetMechs())
 			{
-				results.push_back(mech->GetId().ToString());
+				results.push_back({ mech->GetId().ToString(), "Mech desc here (I don't think they exist yet)" });
 			}
 			return results;
 		}
@@ -199,16 +258,16 @@ namespace cli
 			return CircuitId();
 		}
 
-		static std::vector<std::string> GetCompletions()
+		static AutoCompleter::Completions GetCompletions()
 		{
-			std::vector<std::string> results;
+			AutoCompleter::Completions results;
 			auto& circuits = MechSim::GetMech().m_circuits;
 			for (size_t i = 0; i < circuits.size(); ++i)
 			{
 				const auto& circuit = circuits[i];
 				std::stringstream str;
 				str << i;
-				results.push_back(str.str());
+				results.push_back({ str.str(), "Circuit desc here"});
 			}
 			return results;
 		}
@@ -231,7 +290,6 @@ namespace cli
 		}
 	};
 
-
 	template <typename InT, typename Enable>
 	class ObjectAutoCompleter;
 
@@ -249,61 +307,7 @@ namespace cli
 		}
 	};
 
-	class AutoCompleter
-	{
-	public:
-		AutoCompleter(std::vector<std::string>&& completions)
-		{
-			/*
-			const auto& objects = MechSim::GetAllObjects<T>();
-			for (const auto* obj : objects)
-			{
-				m_completions.push_back(detail::from_string<T>(*m_objects[i]))
-			}
-			*/
-			m_completions = std::move(completions);
-			m_current = 0;
-		}
-
-		bool HasValues() const { return !m_completions.empty(); }
-		size_t Size() const { return m_completions.size(); }
-
-		const std::string* Current()
-		{
-			if (!HasValues()) { return {}; }
-			return &m_completions[m_current];
-		}
-
-		// Peek 0 returns the next element.  Wraps around, but returns nullptr when i >= size() -1
-		const std::string* Peek(size_t i)
-		{
-			const size_t size = Size();
-			if (i >= size - 1)
-			{
-				return nullptr;
-			}
-
-			return &m_completions[(m_current + 1 + i) % size];
-		}
-
-		std::vector<std::string> GetAutoCompletions(size_t cur) const
-		{
-			size_t count = m_completions.size();
-			std::vector<std::string> completions;
-			completions.reserve(count);
-			completions.push_back(m_completions[cur]);
-
-			for (size_t i = (cur + 1) % count; i != cur; i = (i + 1) % count)
-			{
-				completions.push_back(m_completions[i]);
-			}
-			return completions;
-		}
-
-	private:
-		size_t m_current;
-		std::vector<std::string> m_completions;
-	};
+	
 
 	template <typename T, typename Enable>
 	struct ParamAutoComplete;
@@ -324,11 +328,11 @@ namespace cli
 	{
 		static AutoCompleter Get()
 		{
-			std::vector<std::string> completions;
+			AutoCompleter::Completions completions;
 			const auto& objects = MechSim::GetAllObjects<T>();
 			for (const auto* obj : objects)
 			{
-				completions.push_back(detail::from_string<T>(*obj));
+				completions.push_back({ detail::from_string<T>(*obj), obj->GetDescription() });
 			}
 			return AutoCompleter(std::move(completions));
 		}
@@ -339,12 +343,12 @@ namespace cli
 	{
 		static AutoCompleter Get()
 		{
-			std::vector<std::string> completions;
+			AutoCompleter::Completions completions;
 			using ObjectType = typename ObjParam<T>::type;
 			const auto& objects = MechSim::GetAllObjects<ObjectType>();
 			for (const auto* obj : objects)
 			{
-				completions.push_back(obj->GetId().ToString());
+				completions.push_back({ obj->GetId().ToString(), obj->GetDescription() });
 			}
 			return AutoCompleter(std::move(completions));
 		}
@@ -357,7 +361,7 @@ namespace cli
 	{
 		static AutoCompleter Get()
 		{
-			std::vector<std::string> completions = T::GetCompletions();
+			AutoCompleter::Completions completions = T::GetCompletions();
 			return AutoCompleter(std::move(completions));
 		}
 	};

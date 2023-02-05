@@ -228,23 +228,21 @@ namespace cli
 
     // ********************************************************************
     // free utility function to get completions from a list of commands and the current line
-    inline std::vector<std::string> GetCompletions(
+    inline AutoCompleter::Completions GetCompletions(
         const std::shared_ptr<std::vector<std::shared_ptr<Command>>>& cmds,
         const std::string& currentLine,
         size_t param)
     {
-        std::vector<std::string> result;
+        AutoCompleter::Completions result;
         std::for_each(cmds->begin(), cmds->end(),
             [&currentLine, &result, param](const auto& cmd)
             {
                 auto c = cmd->GetCompletionRecursive(currentLine, param);
-                result.insert(
-                    result.end(),
-                    std::make_move_iterator(c.begin()),
-                    std::make_move_iterator(c.end())
-                );
-            }
-        );
+                std::for_each(c.begin(), c.end(), [&result](const auto& completion)
+                    {
+                        result.push_back(completion);
+                    });
+            });
         return result;
     }
 
@@ -265,6 +263,7 @@ namespace cli
 
         Command() : enabled(true), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
         explicit Command(std::string _name) : name(std::move(_name)), enabled(true), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
+        explicit Command(std::string _name, std::string _desc) : name(std::move(_name)), enabled(true), parent(nullptr), description(std::move(_desc)), cmds(std::make_shared<Cmds>()) {}
         virtual ~Command() noexcept = default;
 
         // disable copy and move semantics
@@ -311,6 +310,7 @@ namespace cli
         virtual bool Exec(const std::vector<std::string>& cmdLine, CliSession& session);
 
         bool ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session);
+        Command* FindCommand(const std::vector<std::string>& cmdLine);
 
         std::string Prompt() const
         {
@@ -339,7 +339,7 @@ namespace cli
         // - the recursive completions of subcommands
         // - the recursive completions of parent menu
 
-        std::vector<std::string> GetCompletions(const std::string& currentLine, size_t param) const
+        AutoCompleter::Completions GetCompletions(const std::string& currentLine, size_t param) const
         {
             auto result = cli::GetCompletions(cmds, currentLine, param);
 
@@ -349,7 +349,11 @@ namespace cli
             if (parent != nullptr && param == 0)
             {
                 auto c = parent->GetCompletionRecursive(currentLine, param);
-                result.insert(result.end(), std::make_move_iterator(c.begin()), std::make_move_iterator(c.end()));
+                //result.insert(result.end(), std::make_move_iterator(c.begin()), std::make_move_iterator(c.end()));
+                std::for_each(c.begin(), c.end(), [&result](const detail::AutoCompletion& completion)
+                    {
+                        result.push_back(completion);
+                    });
             }
             return result;
         }
@@ -361,31 +365,41 @@ namespace cli
         // returns:
         // - the completion of this menu command
         // - the recursive completions of the subcommands
-        virtual std::vector<std::string> GetCompletionRecursive(const std::string& line, size_t param)
+        virtual AutoCompleter::Completions GetCompletionRecursive(const std::string& line, size_t param)
         {
             if (!enabled) { return {}; }
 
-            if (Name().find(line) == 0) // line starts_with Name()
+            std::string nameOnly = line;
+            size_t tokenEnd = 0;
+            while (tokenEnd < nameOnly.size() && !std::isspace(nameOnly[tokenEnd]))
+            {
+                ++tokenEnd;
+            }
+            nameOnly = nameOnly.substr(0, tokenEnd);
+
+            if (Name().find(nameOnly) == 0) // line starts_with Name()
             {
                 auto rest = line;
                 rest.erase(0, Name().size());
                 // trim_left(rest);
                 rest.erase(rest.begin(), std::find_if(rest.begin(), rest.end(), [](int ch) { return !std::isspace(ch); }));
-                std::vector<std::string> result;
+                AutoCompleter::Completions result;
                 for (const auto& cmd : *cmds)
                 {
                     auto cs = cmd->GetCompletionRecursive(rest, param);
                     for (const auto& c : cs)
-                        result.push_back(Name() + ' ' + c); // concat submenu with command
+                    {
+                        result.push_back({ Name() + ' ' + c.text, "" }); // concat submenu with command
+                    }
                 }
 
                 if (!result.empty())
                 {
-                    result.push_back(Name());
+                    result.push_back({ Name(), description });
                     return result;
                 }
 
-                return { Name() };
+                return { { Name(), description } };
             }
 
             return {};
@@ -409,9 +423,13 @@ namespace cli
 
         CmdHandler Insert(std::string&& menuName);
 
-    protected:
         const std::string& Name() const { return name; }
+        const std::string& Description() const { return description; }
+
+    protected:
         bool IsEnabled() const { return enabled; }
+
+        const std::string description;
 
     private:
         const std::string name;
@@ -429,7 +447,7 @@ namespace cli
         CmdHandler Insert(const std::string& name, const std::string& help);
 
         Command* parent{ nullptr };
-        const std::string description;
+        
         // using shared_ptr instead of unique_ptr to get a weak_ptr
         // for the CmdHandler::Descriptor
         using Cmds = std::vector<std::shared_ptr<Command>>;
@@ -483,7 +501,10 @@ namespace cli
             return history.Next();
         }
 
-        std::vector<std::string> GetCompletions(std::string currentLine, size_t param) const;
+        const Command* GetCurrentCommand(const std::string& line) const;
+
+        detail::AutoCompletion GetCurrentCommandCompletion(const std::string& line) const;
+        AutoCompleter::Completions GetCompletions(std::string currentLine, size_t param) const;
 
     private:
         virtual void SetPromptSize(size_t size) {}
@@ -740,7 +761,7 @@ namespace cli
             std::string desc,
             std::vector<std::string> parDesc
         )
-            : Command(_name), func(std::move(fun)), description(std::move(desc)), parameterDesc(std::move(parDesc))
+            : Command(_name, std::move(desc)), func(std::move(fun)), parameterDesc(std::move(parDesc))
         {
         }
 
@@ -774,7 +795,7 @@ namespace cli
             //ObjectAutoCompleter<T> = 
         }
 
-        std::vector<std::string> GetCompletionRecursive(const std::string& currentLine, size_t param) override
+        AutoCompleter::Completions GetCompletionRecursive(const std::string& currentLine, size_t param) override
         {
             if (param == 0)
             {
@@ -847,7 +868,7 @@ namespace cli
 
     private:
         const F func;
-        const std::string description;
+        //const std::string description;
         const std::vector<std::string> parameterDesc;
 
         std::array<size_t, sizeof...(Args)> m_autoCompleteIndices = { 0 };
@@ -986,6 +1007,21 @@ namespace cli
         }
     }
 
+    inline const Command* CliSession::GetCurrentCommand(const std::string& line) const
+    {
+        std::vector<std::string> strs;
+        detail::split(strs, line);
+
+        //const_cast<CliSession*>(this)->FindCommand(strs);
+        if (auto* command = current->FindCommand(strs))
+        {
+            return command;
+        }
+
+        // root menu recursive cmds check
+        return globalScopeMenu->FindCommand(strs);
+    }
+
     inline size_t CliSession::PromptImpl()
     {
         if (exit) return 0;
@@ -1024,7 +1060,7 @@ namespace cli
         exit = true; // prevent the prompt to be shown
     }
 
-    inline std::vector<std::string> CliSession::GetCompletions(std::string currentLine, size_t param) const
+    inline AutoCompleter::Completions CliSession::GetCompletions(std::string currentLine, size_t param) const
     {
 
         // trim_left(currentLine);
@@ -1040,6 +1076,17 @@ namespace cli
         //v1.resize(static_cast<std::size_t>(std::distance(v1.begin(), ip)));
 
         return v1;
+    }
+
+    detail::AutoCompletion CliSession::GetCurrentCommandCompletion(const std::string& line) const
+    {
+        const auto* command = GetCurrentCommand(line);
+        if (!command)
+        {
+            return {};
+        }
+
+        return { command->Name(), command->Description() };
     }
 
     // Menu implementation
@@ -1125,6 +1172,33 @@ namespace cli
             }
         }
         return (parent && parent->Exec(cmdLine, session));
+    }
+
+    Command* Command::FindCommand(const std::vector<std::string>& cmdLine)
+    {
+        if (!IsEnabled())
+        {
+            return nullptr;
+        }
+
+        for (auto& cmd : *cmds)
+        {
+            auto validationResult = cmd->Validate(cmdLine);
+            if (validationResult == Command::ValidationResult::NoMatch)
+            {
+                continue;
+            }
+
+            // Command was found, though execution may fail
+            return cmd.get();
+        }
+
+        if (!parent)
+        {
+            return nullptr;
+        }
+        
+        return parent->FindCommand(cmdLine);
     }
 } // namespace cli
 

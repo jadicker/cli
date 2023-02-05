@@ -109,13 +109,14 @@ private:
                 // for now turn on common prefix matching for top level command completion
                 if (paramIndex == 0)
                 {
+                    // TODO: Set up command completion/command as first class citizens
                     if (completions.size() == 1)
                     {
-                        terminal.SetLine(completions[0] + ' ');
+                        terminal.SetLine(completions[0].text + ' ');
                         break;
                     }
 
-                    auto commonPrefix = CommonPrefix(completions);
+                    auto commonPrefix = CommonPrefix(GetTextCompletions(completions));
                     if (commonPrefix.size() > line.size())
                     {
                         terminal.SetLine(commonPrefix);
@@ -123,12 +124,14 @@ private:
                     }
                 }
 
+                auto cmdCompletion = session.GetCurrentCommandCompletion(line);
+
                 std::vector<AutoCompletion> autoCompletions;
                 std::for_each(completions.begin(), completions.end(), [&autoCompletions](auto& cmd)
                     {
-                        autoCompletions.push_back({ cmd, "" });
+                        autoCompletions.push_back(cmd);
                     });
-                terminal.SetCompletions(autoCompletions);
+                terminal.SetCompletions(autoCompletions, cmdCompletion.description);
 
 #ifdef OLD_AUTOCOMPLETE
                 if (completions.size() == 1)

@@ -52,15 +52,17 @@ enum class Symbol
 
 class Terminal
 {
+  friend class ParamList;
+
   public:
     explicit Terminal(std::ostream &_out) : out(_out) {}
 
-    void ResetInputLine() { m_position = 0; }
+    void ResetInputLine() { m_position = m_promptSize; }
 
     void SetLine(const std::string &newLine)
     {
         out << beforeInput
-            << std::string(m_position, '\b') << newLine
+            << std::string(GetInputPosition(), '\b') << newLine
             << afterInput << std::flush;
 
         // if newLine is shorter then currentLine, we have
@@ -73,7 +75,7 @@ class Terminal
         }
 
         m_currentLine = newLine;
-        m_position = m_currentLine.size();
+        m_position = m_currentLine.size() + m_promptSize;
     }
 
     void BackUpToPosition(size_t newPosition)
@@ -89,93 +91,21 @@ class Terminal
 
     void CompleteLine()
     {
-        const auto pos = static_cast<std::string::difference_type>(m_position);
+        const auto pos = static_cast<std::string::difference_type>(m_position - m_promptSize);
 
         out << beforeInput
             << std::string(m_currentLine.begin() + pos, m_currentLine.end())
             << afterInput << std::flush;
-        m_position = m_currentLine.size();
+        m_position = m_promptSize + m_currentLine.size();
     }
 
-#if 0
-    void ClearSuffix()
-    {
-        SavePosition save(this);
-        CompleteLine();
-
-        out << std::string(m_currentSuffix.size(), ' ') << std::string(m_currentSuffix.size(), '\b')
-            << std::flush;
-
-        m_currentSuffix.resize(0);
-    }
-
-    void SetSuffix(const std::string& suffix)
-    {
-        ClearSuffix();
-
-        SavePosition save(this);
-
-        CompleteLine();
-
-        m_currentSuffix = suffix;
-        out << suffix;
-        m_position += suffix.size();
-    }
-#endif
-
-    void SetCompletions(const std::vector<AutoCompletion>& completions)
-    {
-        assert(!completions.empty());
-
-        // TODO: Should probably clear remainder of command here
-        ParamInfo paramInfo = GetCurrentParamInfo(m_currentLine);
-        if (paramInfo.index == 0)
-        {
-            // TODO: This function doesn't handle commands yet
-            return;
-        }
-
-        TrimEnd(paramInfo.startPos, false);
-
-        size_t oldPosition = m_position;
-        out << std::string(m_position - paramInfo.startPos, '\b');
-        InsertText(completions[0].text);
-
-        // Walk the position back to the start of the entry since we're auto-completing until
-        // a space is read
-        m_position -= completions[0].text.size();
-
-        // Clear the line
-        std::stringstream hintText;
-        Down(1);
-        Advance(m_promptSize + m_position);
-        hintText << "^ [";
-
-        std::string completionSuffix;
-        std::for_each(completions.begin() + 1, completions.end(),
-            [&completionSuffix](const AutoCompletion& autoCompletion)
-            {
-                completionSuffix += autoCompletion.text + "  ";
-            });
-
-        hintText << completionSuffix << "]";
-
-        auto str = hintText.str();
-        out << str;
-        //SetSuffix(str);
-        //out << "^ [";
-
-        //BackUpToPosition(paramInfo.startPos);
-        // Fixed reset
-        Up(1);
-        Advance(m_promptSize + m_position);
-
-        out << std::flush;
-    }
+    void SetCompletions(const std::vector<AutoCompletion>& completions, const std::string& cmdDesc);
 
     void InsertText(const std::string& str)
     {
-        m_currentLine.insert(m_position, str.c_str());
+        std::string& currentLine = m_cursorY == 0 ? m_currentLine : m_nextLines[m_cursorY - 1];
+        size_t position = m_cursorY == 0 ? GetInputPosition() : m_position;
+        currentLine.insert(position, str.c_str());
         m_position += str.size();
         out << str << std::flush;
     }
@@ -206,13 +136,16 @@ class Terminal
                 break;
             case KeyType::backspace:
             {
-                if (m_position == 0)
+                if (GetInputPosition() == 0)
                     break;
+                if (m_autoCompleteStart != std::string::npos && m_position <= m_autoCompleteStart)
+                {
+                    ClearAutoComplete();
+                }
 
                 --m_position;
-                --m_cursorX;
 
-                const auto pos = static_cast<std::string::difference_type>(m_position);
+                const auto pos = static_cast<std::string::difference_type>(GetInputPosition());
                 // remove the char from buffer
                 m_currentLine.erase(m_currentLine.begin() + pos);
                 // go back to the previous char
@@ -222,7 +155,8 @@ class Terminal
                 // remove last char
                 out << ' ';
                 // go back to the original position
-                out << std::string(m_currentLine.size() - m_position + 1, '\b') << std::flush;
+                out << std::string(m_currentLine.size() - GetInputPosition() + 1, '\b') << std::flush;
+
                 break;
             }
             case KeyType::up:
@@ -232,30 +166,38 @@ class Terminal
                 return std::make_pair(Symbol::down, std::string{});
                 break;
             case KeyType::left:
-                if (m_position > 0)
+                if (GetInputPosition() > 0)
                 {
                     out << '\b' << std::flush;
                     --m_position;
-                    --m_cursorX;
                 }
                 break;
             case KeyType::right:
-                if (m_position < m_currentLine.size())
+                if (GetInputPosition() < m_currentLine.size())
                 {
                     out << beforeInput
-                        << m_currentLine[m_position]
+                        << m_currentLine[GetInputPosition()]
                         << afterInput << std::flush;
                     ++m_position;
-                    ++m_cursorX;
                 }
                 break;
             case KeyType::ret:
             {
+                size_t lastValidPosition = GetInputPosition();
+                if (lastValidPosition >= m_currentLine.size())
+                {
+                    lastValidPosition = m_currentLine.size() - 1;
+                }
+
+                if (!std::isspace(m_currentLine[lastValidPosition]))
+                {
+                    TryFinishAutoComplete();
+                }
+
                 out << "\r\n";
                 auto cmd = m_currentLine;
                 m_currentLine.clear();
-                m_position = 0;
-                m_cursorX = 0;
+                m_position = m_currentLine.size();
 
                 return std::make_pair(Symbol::command, cmd);
             }
@@ -264,10 +206,28 @@ class Terminal
             {
                 const char c = static_cast<char>(k.second);
                 if (c == '\t')
+                {
                     return std::make_pair(Symbol::tab, std::string());
+                }
                 else
                 {
-                    const auto pos = static_cast<std::string::difference_type>(m_position);
+                    if (m_autoCompleteStart != std::string::npos)
+                    {
+                        const char autoCompleteChar = ' ';
+                        if (m_position < m_autoCompleteStart)
+                        {
+                            ClearAutoComplete();
+                        }
+                        else if (c == autoCompleteChar)
+                        {
+                            if (TryFinishAutoComplete())
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    
+                    const auto pos = static_cast<std::string::difference_type>(GetInputPosition());
 
                     // output the new char:
                     out << beforeInput << c;
@@ -276,28 +236,27 @@ class Terminal
                         << afterInput;
 
                     // go back to the original position
-                    out << std::string(m_currentLine.size() - m_position, '\b') << std::flush;
+                    out << std::string(m_currentLine.size() - GetInputPosition(), '\b') << std::flush;
 
                     // update the buffer and cursor position:
                     m_currentLine.insert(m_currentLine.begin() + pos, c);
                     ++m_position;
-                    ++m_cursorX;
                 }
                 break;
             }
             case KeyType::canc:
             {
-                if (m_position == m_currentLine.size())
+                if (GetInputPosition() == m_currentLine.size())
                     break;
 
-                const auto pos = static_cast<std::string::difference_type>(m_position);
+                const auto pos = static_cast<std::string::difference_type>(GetInputPosition());
 
                 // output the rest of the line
                 out << std::string(m_currentLine.begin() + pos + 1, m_currentLine.end());
                 // remove last char
                 out << ' ';
                 // go back to the original position
-                out << std::string(m_currentLine.size() - m_position, '\b') << std::flush;
+                out << std::string(m_currentLine.size() - GetInputPosition(), '\b') << std::flush;
                 // remove the char from buffer
                 m_currentLine.erase(m_currentLine.begin() + pos);
                 break;
@@ -309,7 +268,7 @@ class Terminal
             }
             case KeyType::home:
             {
-                BackUpToPosition(0);
+                BackUpToPosition(m_promptSize);
                 break;
             }
             case KeyType::ignored:
@@ -329,6 +288,20 @@ class Terminal
     void SetLineStart(size_t start)
     {
         m_promptSize = start;
+        if (m_position < m_promptSize)
+        {
+            m_position = m_promptSize;
+        }
+    }
+
+    size_t GetLineCount() const
+    {
+        return m_nextLines.size() + 1;
+    }
+
+    size_t GetInputPosition() const
+    {
+        return m_position - m_promptSize;
     }
 
     void TestFill2Lines()
@@ -379,13 +352,12 @@ class Terminal
 
         // Note: eats leading whitespace
         bool onWhitespace = std::isspace(line[0]);
-        //paramInfo.startPos = 0;
-        size_t oldStartPos = 0;
-        for (size_t i = 1; i < line.size() && i < m_position;)
+        size_t oldStartPos = m_promptSize;
+        for (size_t i = 1; i < line.size() && i < GetInputPosition();)
         {
             size_t endOfToken = EndOfToken(line, i, onWhitespace);
             paramInfo.startPos = oldStartPos;
-            paramInfo.endPos = endOfToken - 1;
+            paramInfo.endPos = m_promptSize + endOfToken - 1;
             if (endOfToken >= line.size())
             {                
                 return paramInfo;
@@ -405,7 +377,7 @@ class Terminal
             i = endOfToken + 1;
         }
 
-        if (onWhitespace && paramInfo.endPos < line.size())
+        if (onWhitespace && paramInfo.endPos < m_promptSize + line.size())
         {
             // Detected a new parameter, index is already updated
             paramInfo.startPos = paramInfo.endPos + 2;
@@ -416,25 +388,36 @@ class Terminal
     }
 
     // Move the cursor forward
-    void Advance(size_t position)
+    void Advance(size_t size)
     {
+        if (size == 0) { return; }
+
         std::stringstream token;
-        token << "\033[" << position << "C";
+        token << "\033[" << size << "C";
         out << token.str();
 
-        m_cursorX += position;
+        m_position += size;
+    }
+
+    void Reverse(size_t size)
+    {
+        if (size == 0) { return; }
+        if (size > m_position) { size = m_position; }
+
+        out << std::string(size, '\b');
+        m_position -= size;
     }
 
     void Up(size_t lines)
     {
-        if (lines == 0) { return; }
+        if (lines == 0 || m_cursorY == 0) { return; }
 
         std::stringstream token;
         token << "\033[" << lines << "F";
         out << token.str();
 
         // Moves to start of line
-        m_cursorX = 0;
+        m_position = 0;
         m_cursorY--;
     }
 
@@ -447,8 +430,102 @@ class Terminal
         out << token.str();
 
         // Moves to start of line
-        m_cursorX = 0;
+        m_position = 0;
         m_cursorY++;
+    }
+
+    // Wipes size characters ahead of current position and leaves the cursor/position be
+    void ClearAhead()
+    {
+        if (m_currentLine.size() <= m_position)
+        {
+            return;
+        }
+
+        size_t size = m_currentLine.size() - m_position;
+        m_currentLine.erase(m_position, size);
+        out << std::string(size, ' ') << std::string(size, '\b') << std::flush;
+    }
+
+    void ClearBehind(size_t size)
+    {
+        if (size == 0) { return; }
+        if (size > GetInputPosition()) { size = GetInputPosition(); }
+
+        out << std::string(size, '\b') << std::string(size, ' ') << std::string(size, '\b');
+        m_currentLine.erase(GetInputPosition() - size, size);
+        m_position -= size;
+    }
+
+    void ClearAutoComplete()
+    {
+        if (m_autoCompleteStart == std::string::npos)
+        {
+            return;
+        }
+
+        size_t endCurrentToken = GetInputPosition();
+        while (!std::isspace(m_currentLine[endCurrentToken]) && m_currentLine.size() > endCurrentToken + 1)
+        {
+            ++endCurrentToken;
+        }
+
+        size_t finalPosition = m_position;
+
+        while (std::isspace(m_currentLine[endCurrentToken]) && m_currentLine.size() > endCurrentToken + 1)
+        {
+            ++endCurrentToken;
+        }
+
+        Advance(m_promptSize + endCurrentToken - finalPosition);
+        ClearToCurrent();
+        m_autoCompleteStart = std::string::npos;
+
+        Reverse(m_position - finalPosition);
+    }
+
+    bool TryFinishAutoComplete()
+    {
+        if (m_autoCompleteStart == std::string::npos)
+        {
+            return false;
+        }
+
+        ParamInfo paramInfo = GetCurrentParamInfo(m_currentLine);
+        if (m_position < paramInfo.startPos || m_position > paramInfo.endPos)
+        {
+            return false;
+        }
+
+        ClearNextLines();
+
+        // Re-print in regular text
+        Reverse(m_position - paramInfo.startPos);
+        out << beforeInput
+            << std::string(m_currentLine.begin() + (paramInfo.startPos - m_promptSize),
+                           m_currentLine.begin() + (paramInfo.endPos + 1 - m_promptSize))
+            << afterInput << std::flush;
+        m_position = paramInfo.endPos + 1;
+
+        size_t endCurrentToken = GetInputPosition();
+        while (!std::isspace(m_currentLine[endCurrentToken]) && m_currentLine.size() > endCurrentToken + 1)
+        {
+            ++endCurrentToken;
+        }
+        ++endCurrentToken;
+
+        const size_t endCurrentTokenAbsolute = m_promptSize + endCurrentToken;
+        if ((m_promptSize + m_currentLine.size()) == m_position)
+        {
+            InsertText(" ");
+        }
+        else
+        {
+            Advance(1);
+        }
+
+        //ClearToCurrent();
+        return true;
     }
 
     // Resets the cursor to the input position on the input line
@@ -456,7 +533,6 @@ class Terminal
     {
         Up(m_cursorY);
         Advance(m_position);
-        m_cursorX = m_position;
     }
 
     struct SavePosition final
@@ -471,25 +547,207 @@ class Terminal
         size_t m_position;
     };
 
-    void Clear()
+    void ClearNextLines()
     {
+        size_t oldPosition = m_position;
+        bool clearedLines = m_nextLines.size() > 0;
+        while (m_nextLines.size() > 0)
+        {
+            assert(m_cursorY <= (GetLineCount() - 1));
+            Down((GetLineCount() - 1) - m_cursorY);
+            out << std::string(m_nextLines[m_cursorY - 1].size(), ' ');
+            Up(1);
+            m_nextLines.pop_back();
+        }
 
+        // m_position stays constant this whole time
+        if (clearedLines)
+        {
+            Advance(oldPosition);
+        }
+    }
+
+    // Clears everything after current input
+    void ClearToCurrent()
+    {
+        ClearNextLines();
+        if (!m_currentLine.empty() && !std::isspace(m_currentLine.back()))
+        {
+            auto lastSpace = std::find_if(m_currentLine.rbegin(), m_currentLine.rend(),
+                                          [](char c) { return std::isspace(c); });
+            if (lastSpace != m_currentLine.rend())
+            {
+                auto dist = std::distance(m_currentLine.rbegin(), lastSpace);
+                if (dist >= 1)
+                {
+                    Advance((m_promptSize + m_currentLine.size()) - m_position);
+                    ClearBehind(dist);
+                }
+            }
+        }
+        
+        out << std::flush;
+    }
+
+    void AddLine(const std::string& line)
+    {
+        Down(1);
+        out << line << std::flush;
+        m_nextLines.push_back(line);
+        m_position = line.size();
     }
 
     std::string m_currentLine;
     // Suffix is the temporary data at the end of the current line
-    std::string m_currentSuffix;
+    //std::string m_currentSuffix;
     // All remaining lines are temporary
     std::vector<std::string> m_nextLines;
 
+    size_t m_autoCompleteStart = std::string::npos;
     size_t m_position = 0; // next writing position in currentLine
-    size_t m_cursorX = 0;
     size_t m_cursorY = 0; // 0: current line
     size_t m_promptSize = 0;
-    size_t m_lines = 1;
     size_t m_terminalWidth = 120; // make an assumption for now
     std::ostream &out;
 };
+
+class ParamList
+{
+public:
+    using Params = std::vector<AutoCompletion>;
+
+    ParamList(const Params& params) : m_params(params) {}
+
+    void Print(Terminal& t, size_t paramStartPos, size_t style)
+    {
+        if (m_params.size() <= 1)
+        {
+            // TODO: Show no valid/additional completions
+            return;
+        }
+
+        if (style == 0)
+        {
+            // ^ [a b c d] going forward
+            //size_t width = (t.m_terminalWidth - paramStartPos) + 2;
+
+            t.AddLine(std::string(paramStartPos, ' '));
+            t.InsertText("^ [");
+
+            t.out << rang::fg::blue;
+
+            std::string completionSuffix;
+            for (size_t i = 1; i < m_params.size(); ++i)
+            {
+                completionSuffix += m_params[i].text;
+                if (i != m_params.size() - 1)
+                {
+                    completionSuffix += "  ";
+                }
+            }
+
+            t.InsertText(completionSuffix);
+
+            t.out << rang::style::reset;
+
+            t.InsertText("]");
+        }
+        else if (style == 1)
+        {
+            // prompt> cmd parm
+            //  [.. b c d] ^ <desc text>
+            // ^          ^^ > subtract these from the width
+            size_t width = paramStartPos - 3;
+
+            if (m_params.back().text.size() > width)
+            {
+                // TODO: Show no completions can be shown or abbreviate
+                return;
+            }
+
+            // We have one param to start
+            const std::string spacing = " ";
+            int paramsShown = 1;
+            size_t requiredWidth = m_params[1].text.size();
+            size_t remainingWidth = width - m_params[1].text.size();
+            for (int i = 2; i < m_params.size(); ++i)
+            {
+                size_t paramWidth = m_params[i].text.size() + spacing.size();
+                if (paramWidth > remainingWidth)
+                {
+                    break;
+                }
+                
+                ++paramsShown;
+                requiredWidth += paramWidth;
+                remainingWidth -= paramWidth;
+            }
+
+            //    [.. b c d] ^ <desc text>
+            // ^^^ padding
+            size_t padding = width - requiredWidth;
+
+            t.AddLine(std::string(padding, ' '));
+            t.InsertText("[");
+            t.out << rang::fg::blue;
+            for (int i = paramsShown; i >= 2; --i)
+            {
+                t.InsertText(m_params[i].text + " ");
+            }
+            
+            t.out << rang::fg::cyan;
+            t.InsertText(m_params[1].text);
+            t.out << rang::style::reset;
+
+            t.InsertText("] ^> ");
+            t.InsertText(m_params[0].description);
+        }
+    }
+
+private:
+    Params m_params;
+};
+
+void Terminal::SetCompletions(const std::vector<AutoCompletion>& completions, const std::string& cmdDesc)
+{
+    assert(!completions.empty());
+
+    // TODO: Should probably clear remainder of command here
+    ParamInfo paramInfo = GetCurrentParamInfo(m_currentLine);
+    if (paramInfo.index == 0)
+    {
+        // TODO: This function doesn't handle commands yet
+        return;
+    }
+
+    m_autoCompleteStart = paramInfo.startPos;
+
+    ClearToCurrent();
+
+    size_t oldPosition = m_position;
+
+    out << rang::fg::yellow;
+    InsertText(completions[0].text);
+    out << rang::style::reset;
+
+    // Clear the line
+#if 0
+    Down(1);
+    Advance(m_promptSize + m_position);
+#endif
+
+    ParamList paramList(completions);
+    paramList.Print(*this, oldPosition, 1);
+
+    // Add description line
+    AddLine(std::string(oldPosition, ' '));
+    InsertText(cmdDesc);
+
+    Up(1);
+    Advance(oldPosition);
+
+    out << std::flush;
+}
 
 } // namespace detail
 } // namespace cli
