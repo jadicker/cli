@@ -607,24 +607,9 @@ namespace cli
         {
             assert( first != last );
             assert( std::distance(first, last) == 1+sizeof...(Args) );
-            //const P p = detail::from_string<typename std::decay<P>::type>(*first);
             
             using UnqualifiedP = typename std::decay<P>::type;
-            UnqualifiedP opt;
-            if constexpr (std::is_base_of<Id, UnqualifiedP>::value)
-            {
-                // Yikes, this is goofy.  TODO: Clean this up
-                if (!opt.Id::Create(out, parmDescs[i], *first))
-                {
-                    return false;
-                }
-            }
-            else
-            {
-                opt = detail::from_string<UnqualifiedP>(*first);
-            }
-            
-            const P p = opt;
+            const P p = detail::FromString<UnqualifiedP>::get(out, parmDescs[i], *first);
 
             auto g = [&](auto ... pars){ f(p, pars...); };
             return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);

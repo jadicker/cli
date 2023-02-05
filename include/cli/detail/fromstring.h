@@ -42,11 +42,13 @@ namespace detail
 {
 
 template <typename T>
-inline
-T from_string(const std::string& s)
+struct from_string
 {
-    return boost::lexical_cast<T>(s);
-}
+    static T get(const std::string& s)
+    {
+        return boost::lexical_cast<T>(s);
+    }
+};
 
 } // namespace detail
 } // namespace cli
@@ -61,34 +63,54 @@ T from_string(const std::string& s)
 namespace cli
 {
 
-    namespace detail
-    {
-        class bad_conversion : public std::bad_cast
-        {
-            public:
-                const char* what() const noexcept override {
-                    return "bad from_string conversion: "
-                        "source string value could not be interpreted as target";
-                }
-        };
-
-template <typename T>
-inline T from_string(const std::string& s);
-
-template <>
-inline std::string from_string(const std::string& s)
-{
-    return s;
-}
-
-template <>
-inline std::nullptr_t from_string(const std::string& /*s*/)
-{
-    return nullptr;
-}
-
 namespace detail
 {
+
+class bad_conversion : public std::bad_cast
+{
+    public:
+        const char* what() const noexcept override {
+            return "bad from_string conversion: "
+                "source string value could not be interpreted as target";
+        }
+};
+
+// fallback: operator <<
+
+template <typename T>
+struct FromString
+{
+    static T get(std::ostream& out, const std::string& paramName, const std::string& input)
+    {
+        std::stringstream interpreter;
+        T result;
+
+        if (!(interpreter << input) ||
+            !(interpreter >> result) ||
+            !(interpreter >> std::ws).eof())
+            throw bad_conversion();
+
+        return result;
+    }
+};
+
+template <>
+struct FromString<std::string>
+{
+    static std::string get(std::ostream&, const std::string&, const std::string& s)
+    {
+        return s;
+    }
+};
+
+template <>
+struct FromString<std::nullptr_t>
+{
+    static std::nullptr_t get(std::ostream&, const std::string&, const std::string& /*s*/)
+    {
+        return nullptr;
+    }
+};
 
 template <typename T>
 inline T unsigned_digits_from_string(const std::string& s)
@@ -145,132 +167,142 @@ inline T signed_from_string(std::string s)
     return static_cast<T>(val);
 }
 
-} // namespace detail
-
 // signed
 
-template <> inline signed char 
-from_string(const std::string& s) { return detail::signed_from_string<signed char>(s); }
+template <> struct FromString<signed char> {
+    static signed char get(std::ostream&, const std::string&, const std::string& s) { return detail::signed_from_string<signed char>(s); }
+};
 
-template <> inline short int 
-from_string(const std::string& s) { return detail::signed_from_string<short int>(s); }
+template <> struct FromString<short int> {
+    static short int get(std::ostream&, const std::string&, const std::string& s) { return detail::signed_from_string<short int>(s); }
+};
 
-template <> inline int
-from_string(const std::string& s) { return detail::signed_from_string<int>(s); }
+template <> struct FromString<int> {
+    static int get(std::ostream&, const std::string&, const std::string& s) { return detail::signed_from_string<int>(s); }
+};
 
-template <> inline long int
-from_string(const std::string& s) { return detail::signed_from_string<long int>(s); }
+template <> struct FromString<long int> {
+    static long int get(std::ostream&, const std::string&, const std::string& s) { return detail::signed_from_string<long int>(s); }
+};
 
-template <> inline long long int
-from_string(const std::string& s) { return detail::signed_from_string<long long int>(s); }
+template <> struct FromString<long long int> {
+    static long long int get(std::ostream&, const std::string&, const std::string& s) { return detail::signed_from_string<long long int>(s); }
+};
 
 // unsigned
 
-template <> inline unsigned char
-from_string(const std::string& s) { return detail::unsigned_from_string<unsigned char>(s); }
+template <> struct FromString<unsigned char> {
+    static unsigned char get(std::ostream&, const std::string&, const std::string& s) { return detail::unsigned_from_string<unsigned char>(s); }
+};
 
-template <> inline unsigned short int
-from_string(const std::string& s) { return detail::unsigned_from_string<unsigned short int>(s); }
+template <> struct FromString<unsigned short int> {
+    static unsigned short int get(std::ostream&, const std::string&, const std::string& s) { return detail::unsigned_from_string<unsigned short int>(s); }
+};
 
-template <> inline unsigned int
-from_string(const std::string& s) { return detail::unsigned_from_string<unsigned int>(s); }
+template <> struct FromString<unsigned int> {
+    static unsigned int get(std::ostream&, const std::string&, const std::string& s) { return detail::unsigned_from_string<unsigned int>(s); }
+};
 
-template <> inline unsigned long int
-from_string(const std::string& s) { return detail::unsigned_from_string<unsigned long int>(s); }
+template <> struct FromString<unsigned long int> {
+    static unsigned long int get(std::ostream&, const std::string&, const std::string& s) { return detail::unsigned_from_string<unsigned long int>(s); }
+};
 
-template <> inline unsigned long long int
-from_string(const std::string& s) { return detail::unsigned_from_string<unsigned long long int>(s); }
+template <> struct FromString<unsigned long long int> {
+    static unsigned long long int get(std::ostream&, const std::string&, const std::string& s) { return detail::unsigned_from_string<unsigned long long int>(s); }
+};
 
 // bool
 
 template <>
-inline bool from_string(const std::string& s)
+struct FromString<bool>
 {
-    if (s == "true") return true;
-    else if (s == "false") return false;
-    const auto value = detail::signed_from_string<long long int>(s);
-    if (value == 1) return true;
-    else if (value == 0) return false;
-    throw bad_conversion();            
-}
+    static bool get(std::ostream&, const std::string&, const std::string& s)
+    {
+        if (s == "true") return true;
+        else if (s == "false") return false;
+        const auto value = detail::signed_from_string<long long int>(s);
+        if (value == 1) return true;
+        else if (value == 0) return false;
+        throw bad_conversion();
+    }
+};
 
 // chars
 
 template <>
-inline char from_string(const std::string& s)
+struct FromString<char>
 {
-    if (s.size() != 1) throw bad_conversion();
-    return s[0];            
-}
+    static char get(std::ostream&, const std::string&, const std::string& s)
+    {
+        if (s.size() != 1) throw bad_conversion();
+        return s[0];
+    }
+};
 
 // floating points
 
 template <>
-inline float from_string(const std::string& s)
+struct FromString<float>
 {
-    if ( std::any_of(s.begin(), s.end(), [](char c){return std::isspace(c);} ) )
-        throw bad_conversion();
-    std::string::size_type sz;
-    float result = {};
-    try {
-        result = std::stof(s, &sz);
-    } catch (const std::exception&) {
-        throw bad_conversion();
+    static float get(std::ostream&, const std::string&, const std::string& s)
+    {
+        if (std::any_of(s.begin(), s.end(), [](char c) {return std::isspace(c); }))
+            throw bad_conversion();
+        std::string::size_type sz;
+        float result = {};
+        try {
+            result = std::stof(s, &sz);
+        }
+        catch (const std::exception&) {
+            throw bad_conversion();
+        }
+        if (sz != s.size())
+            throw bad_conversion();
+        return result;
     }
-    if (sz != s.size())
-        throw bad_conversion();
-    return result;
-}
+};
 
 template <>
-inline double from_string(const std::string& s)
+struct FromString<double>
 {
-    if ( std::any_of(s.begin(), s.end(), [](char c){return std::isspace(c);} ) )
-        throw bad_conversion();
-    std::string::size_type sz;
-    double result = {};
-    try {
-        result = std::stod(s, &sz);
-    } catch (const std::exception&) {
-        throw bad_conversion();
+    static double get(std::ostream&, const std::string&, const std::string& s)
+    {
+        if (std::any_of(s.begin(), s.end(), [](char c) {return std::isspace(c); }))
+            throw bad_conversion();
+        std::string::size_type sz;
+        double result = {};
+        try {
+            result = std::stod(s, &sz);
+        }
+        catch (const std::exception&) {
+            throw bad_conversion();
+        }
+        if (sz != s.size())
+            throw bad_conversion();
+        return result;
     }
-    if (sz != s.size())
-        throw bad_conversion();
-    return result;
-}
+};
 
 template <>
-inline long double from_string(const std::string& s)
+struct FromString<long double>
 {
-    if ( std::any_of(s.begin(), s.end(), [](char c){return std::isspace(c);} ) )
-        throw bad_conversion();
-    std::string::size_type sz;
-    long double result = {};
-    try {
-        result = std::stold(s, &sz);
-    } catch (const std::exception&) {
-        throw bad_conversion();
+    static long double get(std::ostream&, const std::string&, const std::string& s)
+    {
+        if (std::any_of(s.begin(), s.end(), [](char c) {return std::isspace(c); }))
+            throw bad_conversion();
+        std::string::size_type sz;
+        long double result = {};
+        try {
+            result = std::stold(s, &sz);
+        }
+        catch (const std::exception&) {
+            throw bad_conversion();
+        }
+        if (sz != s.size())
+            throw bad_conversion();
+        return result;
     }
-    if (sz != s.size())
-        throw bad_conversion();
-    return result;
-}
-
-// fallback: operator <<
-
-template <typename T>
-inline T from_string(const std::string& s)
-{
-    std::stringstream interpreter;
-    T result;
-
-    if(!(interpreter << s) ||
-        !(interpreter >> result) ||
-        !(interpreter >> std::ws).eof())
-        throw bad_conversion();
-
-    return result;
-}
+};
 
     } // namespace detail
 

@@ -247,18 +247,6 @@ namespace cli
 	public:
 		explicit operator bool() const { return m_id == 0; }
 
-		// TODO: How to not duplicate this?
-		static MechId Create(const std::string& idStr)
-		{
-			if (auto val = MechSim::ReadInt(idStr); val)
-			{
-				MechId id;
-				id.m_id = *val;
-				return id;
-			}
-			return MechId();
-		}
-
 		static AutoCompleter::Completions GetCompletions()
 		{
 			AutoCompleter::Completions results;
@@ -279,18 +267,6 @@ namespace cli
 	class CircuitId : public Id
 	{
 	public:
-		// TODO: How to not duplicate this?
-		static CircuitId Create(const std::string& idStr)
-		{
-			if (auto val = MechSim::ReadInt(idStr); val)
-			{
-				CircuitId id;
-				id.m_id = *val;
-				return id;
-			}
-			return CircuitId();
-		}
-
 		static AutoCompleter::Completions GetCompletions()
 		{
 			AutoCompleter::Completions results;
@@ -365,7 +341,7 @@ namespace cli
 			const auto& objects = MechSim::GetAllObjects<T>();
 			for (const auto* obj : objects)
 			{
-				completions.push_back({ detail::from_string<T>(*obj), obj->GetDescription() });
+				completions.push_back({ detail::FromString<T>::get(*obj), obj->GetDescription() });
 			}
 			return AutoCompleter(std::move(completions));
 		}
@@ -405,25 +381,37 @@ namespace cli
 
 	namespace detail
 	{
-		/*
-		// Partial function specialization won't work
-		template <typename T>
-		inline ObjParam<T> from_string(const std::string& s)
+		template <typename T, typename Filter>
+		struct FromString<FilteredObjParam<T, Filter>>
 		{
-			return GetObjRaw<T>(s);
-		}
-		*/
+			static FilteredObjParam<T, Filter> get(std::ostream& out, const std::string& paramName, const std::string& s)
+			{
+				FilteredObjParam<T, Filter> result;
+				result.Create(out, paramName, s);
+				return result;
+			}
+		};
 
 		template <>
-		inline MechId from_string(const std::string& s)
+		struct FromString<MechId>
 		{
-			return MechId::Create(s);
-		}
+			static MechId get(std::ostream& out, const std::string& param, const std::string& s)
+			{
+				MechId result;
+				result.Create(out, param, s);
+				return result;
+			}
+		};
 
 		template <>
-		inline CircuitId from_string(const std::string& s)
+		struct FromString<CircuitId>
 		{
-			return CircuitId::Create(s);
-		}
+			static CircuitId get(std::ostream& out, const std::string& param, const std::string& s)
+			{
+				CircuitId result;
+				result.Create(out, param, s);
+				return result;
+			}
+		};
 	}
 }
