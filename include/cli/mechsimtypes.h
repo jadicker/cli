@@ -139,11 +139,37 @@ namespace cli
 		return MechSim::GetObjectRegistry().Get(objectId);
 	}
 
-	template <typename T>
-	class ObjParam final
+	namespace ObjFilters
+	{
+		// Return true if this obj passes the filter
+		using FilterFn = std::function<bool(const MechSim::Object* obj)>;
+
+		struct None
+		{
+			static FilterFn Get()
+			{
+				return [](const MechSim::Object*) { return true; };
+			}
+		};
+
+		struct Powerable
+		{
+			static FilterFn Get()
+			{
+				return [](const MechSim::Object* obj)
+				{
+					return !!dynamic_cast<const Powerable*>(obj);
+				};
+			}
+		};
+	}
+
+	template <typename T, typename FilterFnObj>
+	class FilteredObjParam final
 	{
 	public:
 		using type = T;
+		using filter = FilterFnObj;
 
 		T& operator*() { return *m_object; }
 		T* operator->() { return m_object; }
@@ -159,12 +185,19 @@ namespace cli
 		// Only call from safe contexts!
 		T& Get() { return *m_object; }
 
+		MechSim::ObjectId GetId() { return m_object ? m_object->GetId() : MechSim::NullId; }
+
 		MechSim::Object* GetObj() { return dynamic_cast<MechSim::Object*>(m_object); }
 		const MechSim::Object* GetObj() const { return dynamic_cast<MechSim::Object*>(m_object); }
 
 	private:
 		T* m_object = nullptr;
 	};
+	
+	template <typename T>
+	using ObjParam = FilteredObjParam<T, ObjFilters::None>;
+
+	using Powerable = FilteredObjParam<MechSim::Object, ObjFilters::Powerable>;
 
 	template <typename T>
 	inline std::ostream& operator<<(std::ostream& os, const ObjParam<T>& object)
@@ -338,17 +371,21 @@ namespace cli
 		}
 	};
 
-	template <typename T>
-	struct ParamAutoComplete<ObjParam<T>>
+	template <typename T, typename FilterFnObj>
+	struct ParamAutoComplete<FilteredObjParam<T, FilterFnObj>>
 	{
 		static AutoCompleter Get()
 		{
 			AutoCompleter::Completions completions;
 			using ObjectType = typename ObjParam<T>::type;
 			const auto& objects = MechSim::GetAllObjects<ObjectType>();
+			auto filter = FilterFnObj::Get();
 			for (const auto* obj : objects)
 			{
-				completions.push_back({ obj->GetId().ToString(), obj->GetDescription() });
+				if (filter(obj))
+				{
+					completions.push_back({ obj->GetId().ToString(), obj->GetDescription() });
+				}
 			}
 			return AutoCompleter(std::move(completions));
 		}

@@ -89,6 +89,14 @@ class Terminal
         m_position = newPosition;
     }
 
+    // Doesn't support going down
+    void GoBackToPosition(size_t posX, size_t posY)
+    {
+        assert(posY <= m_cursorY);
+        Up(m_cursorY - posY);
+        Advance(posX);
+    }
+
     void CompleteLine()
     {
         const auto pos = static_cast<std::string::difference_type>(m_position - m_promptSize);
@@ -101,10 +109,19 @@ class Terminal
 
     void SetCompletions(const std::vector<AutoCompletion>& completions, const std::string& cmdDesc);
 
-    void InsertText(const std::string& str)
+    void InsertText(std::string str)
     {
         std::string& currentLine = m_cursorY == 0 ? m_currentLine : m_nextLines[m_cursorY - 1];
         size_t position = m_cursorY == 0 ? GetInputPosition() : m_position;
+        
+        const size_t remainingWidth = m_terminalWidth - position;
+        size_t lineWidth = position + str.size();
+        if (lineWidth > remainingWidth)
+        {
+            str.resize(remainingWidth - 4);
+            str += " ..";
+        }
+
         currentLine.insert(position, str.c_str());
         m_position += str.size();
         out << str << std::flush;
@@ -189,7 +206,7 @@ class Terminal
                     lastValidPosition = m_currentLine.size() - 1;
                 }
 
-                if (!std::isspace(m_currentLine[lastValidPosition]))
+                if (!m_currentLine.empty() && !std::isspace(m_currentLine[lastValidPosition]))
                 {
                     TryFinishAutoComplete();
                 }
@@ -418,7 +435,7 @@ class Terminal
 
         // Moves to start of line
         m_position = 0;
-        m_cursorY--;
+        m_cursorY -= lines;
     }
 
     void Down(size_t lines)
@@ -537,14 +554,20 @@ class Terminal
 
     struct SavePosition final
     {
-        SavePosition(Terminal* terminal) : m_terminal(terminal), m_position(terminal->m_position) {}
+        SavePosition(Terminal* terminal)
+            : m_terminal(terminal)
+            , m_position(terminal->m_position)
+            , m_cursorY(terminal->m_cursorY)
+        {}
+
         ~SavePosition()
         {
-            m_terminal->BackUpToPosition(m_position);
+            m_terminal->GoBackToPosition(m_position, m_cursorY);
         }
 
         Terminal* m_terminal;
         size_t m_position;
+        size_t m_cursorY;
     };
 
     void ClearNextLines()
@@ -587,6 +610,16 @@ class Terminal
         }
         
         out << std::flush;
+    }
+
+    void CreateLines(size_t count)
+    {
+        SavePosition save(this);
+        for (size_t i = 0; i < count; ++i)
+        {
+            out << "\r\n";
+        }
+        m_cursorY += count;
     }
 
     void AddLine(const std::string& line)
@@ -725,6 +758,9 @@ void Terminal::SetCompletions(const std::vector<AutoCompletion>& completions, co
     ClearToCurrent();
 
     size_t oldPosition = m_position;
+
+    // Uses 2 additional lines, make sure we have room
+    CreateLines(2);
 
     out << rang::fg::yellow;
     InsertText(completions[0].text);

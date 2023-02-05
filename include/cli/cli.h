@@ -358,14 +358,8 @@ namespace cli
             return result;
         }
 
-        // Returns the collection of completions relatives to this command.
-        // For simple commands, provides a base implementation that use the name of the command
-        // for aggregate commands (i.e., Menu), the function is redefined to give the menu command
-        // and the subcommand recursively
-        // returns:
-        // - the completion of this menu command
-        // - the recursive completions of the subcommands
-        virtual AutoCompleter::Completions GetCompletionRecursive(const std::string& line, size_t param)
+        // Returns true if line matches for this command
+        bool MatchCommand(const std::string& line) const
         {
             if (!enabled) { return {}; }
 
@@ -377,32 +371,44 @@ namespace cli
             }
             nameOnly = nameOnly.substr(0, tokenEnd);
 
-            if (Name().find(nameOnly) == 0) // line starts_with Name()
+            return Name().find(nameOnly) == 0; // line starts_with Name()
+        }
+
+        // Returns the collection of completions relatives to this command.
+        // For simple commands, provides a base implementation that use the name of the command
+        // for aggregate commands (i.e., Menu), the function is redefined to give the menu command
+        // and the subcommand recursively
+        // returns:
+        // - the completion of this menu command
+        // - the recursive completions of the subcommands
+        virtual AutoCompleter::Completions GetCompletionRecursive(const std::string& line, size_t param)
+        {
+            if (!MatchCommand(line))
             {
-                auto rest = line;
-                rest.erase(0, Name().size());
-                // trim_left(rest);
-                rest.erase(rest.begin(), std::find_if(rest.begin(), rest.end(), [](int ch) { return !std::isspace(ch); }));
-                AutoCompleter::Completions result;
-                for (const auto& cmd : *cmds)
-                {
-                    auto cs = cmd->GetCompletionRecursive(rest, param);
-                    for (const auto& c : cs)
-                    {
-                        result.push_back({ Name() + ' ' + c.text, "" }); // concat submenu with command
-                    }
-                }
-
-                if (!result.empty())
-                {
-                    result.push_back({ Name(), description });
-                    return result;
-                }
-
-                return { { Name(), description } };
+                return {};
             }
 
-            return {};
+            auto rest = line;
+            rest.erase(0, Name().size());
+            // trim_left(rest);
+            rest.erase(rest.begin(), std::find_if(rest.begin(), rest.end(), [](int ch) { return !std::isspace(ch); }));
+            AutoCompleter::Completions result;
+            for (const auto& cmd : *cmds)
+            {
+                auto cs = cmd->GetCompletionRecursive(rest, param);
+                for (const auto& c : cs)
+                {
+                    result.push_back({ Name() + ' ' + c.text, "" }); // concat submenu with command
+                }
+            }
+
+            if (!result.empty())
+            {
+                result.push_back({ Name(), description });
+                return result;
+            }
+
+            return { { Name(), description } };
         }
 
         template <typename F>
@@ -801,6 +807,11 @@ namespace cli
             {
                 // Complete for our own name
                 return Command::GetCompletionRecursive(currentLine, param);
+            }
+
+            if (!MatchCommand(currentLine))
+            {
+                return {};
             }
 
             if constexpr (sizeof...(Args) > 0)
