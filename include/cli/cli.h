@@ -70,8 +70,16 @@ namespace cli
     template <> struct TypeDesc< bool > { static const char* Name() { return "<bool>"; } };
     template <> struct TypeDesc< std::string > { static const char* Name() { return "<string>"; } };
     template <> struct TypeDesc< std::vector<std::string> > { static const char* Name() { return "<list of strings>"; } };
+    
+    template <> struct TypeDesc<Powerable> { static const char* Name() { return "Powerable"; } };
+    template <> struct TypeDesc<MechId> { static const char* Name() { return "MechId"; } };
+    template <> struct TypeDesc<CircuitId> { static const char* Name() { return "CircuitId"; } };
+    template <> struct TypeDesc<ReactorPlug> { static const char* Name() { return "ReactorPlug"; } };
+    template <> struct TypeDesc<PartName> { static const char* Name() { return "PartName"; } };
+    template <> struct TypeDesc<FilteredObjParam<MechSim::Part, ObjFilters::MountableByController>> { static const char* Name() { return "Controllable"; } };
 
-    template <typename T> struct TypeDesc<ObjParam<T>>
+    template <typename T, typename Fn>
+    struct TypeDesc<FilteredObjParam<T, Fn>>
     {
         static std::string Name()
         {
@@ -290,7 +298,7 @@ namespace cli
             auto& otherCmds = *other.cmds;
             for (auto iter = otherCmds.begin(); iter != otherCmds.end();)
             {
-                if (!dynamic_cast<const Command*>(iter->get()))
+                if (dynamic_cast<const Command*>(iter->get()))
                 {
                     cmds->push_back(*iter);
                     iter = otherCmds.erase(iter);
@@ -656,7 +664,7 @@ namespace cli
                 return ParamUtil<ArgCdr...>::CallWith<Action>(i - 1);
             }
 
-            return Action<ArgCar>::Get();
+            return Action<std::decay_t<ArgCar>>::Get();
         }
     };
 
@@ -712,6 +720,9 @@ namespace cli
 
         static void Dump(std::ostream& out, const std::vector<std::string>& parmDescs, size_t i = 0)
         {
+            // Did you specify all parameters?
+            assert(parmDescs.size() > i);
+
             out << Style::Parameter()
                 << TypeDesc< typename std::decay<P>::type >::Name()
                 << reset
@@ -781,9 +792,6 @@ namespace cli
             {
                 return {};
             }
-            //GetParameterElement<N, Args...>()
-            //std::get<N>(std::forward_as_tuple(std::forward<Args...>()...));
-            //ObjectAutoCompleter<T> = 
         }
 
         AutoCompleter::Completions GetCompletionRecursive(const std::string& currentLine, size_t param) override
@@ -1089,6 +1097,7 @@ namespace cli
     template <typename F, typename R, typename ... Args>
     CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const )
     {
+        assert(parDesc.size() == 0 || parDesc.size() == sizeof...(Args));
         return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, help, parDesc));
     }
 

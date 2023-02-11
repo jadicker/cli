@@ -31,6 +31,7 @@
 #define CLI_DETAIL_TERMINAL_H_
 
 #include <string>
+#include <numeric>
 #include "../colorprofile.h"
 #include "inputdevice.h"
 #include "autocomplete.h"
@@ -114,7 +115,7 @@ class Terminal
         std::string& currentLine = m_cursorY == 0 ? m_currentLine : m_nextLines[m_cursorY - 1];
         size_t position = m_cursorY == 0 ? GetInputPosition() : m_position;
         
-        const size_t remainingWidth = m_terminalWidth - position;
+        const size_t remainingWidth = m_terminalWidth - m_position;
         size_t lineWidth = position + str.size();
         if (lineWidth > remainingWidth)
         {
@@ -367,16 +368,33 @@ class Terminal
 
         paramInfo.index = 0;
 
+        size_t paramStart = 0;
+        size_t paramEnd = 0;
+
         // Note: eats leading whitespace
         bool onWhitespace = std::isspace(line[0]);
-        size_t oldStartPos = m_promptSize;
-        for (size_t i = 1; i < line.size() && i < GetInputPosition();)
+        bool whitespaceToken = onWhitespace;
+        //size_t oldStartPos = 0;
+        for (size_t i = 1; i < line.size() && (whitespaceToken || i < GetInputPosition());)
         {
             size_t endOfToken = EndOfToken(line, i, onWhitespace);
-            paramInfo.startPos = oldStartPos;
-            paramInfo.endPos = m_promptSize + endOfToken - 1;
+            if (endOfToken > paramEnd)
+            {
+                whitespaceToken = onWhitespace;
+            }
+
+            paramStart = paramEnd + 1;
+            paramEnd = endOfToken - 1;
             if (endOfToken >= line.size())
-            {                
+            {
+                if (whitespaceToken)
+                {
+                    paramStart += 1;
+                    paramEnd += 1;
+                }
+
+                paramInfo.startPos = paramStart + m_promptSize;
+                paramInfo.endPos = paramEnd + m_promptSize;
                 return paramInfo;
             }
 
@@ -385,21 +403,27 @@ class Terminal
                 // Cleared token and hit whitespace, indicating a possible new param
                 ++paramInfo.index;
             }
-            else
-            {
-                oldStartPos = endOfToken + 1;
-            }
+            //else
+            //{
+            //    oldStartPos = endOfToken + 1;
+            //}
 
             onWhitespace = !onWhitespace;
-            i = endOfToken + 1;
+            i = endOfToken;
         }
 
-        if (onWhitespace && paramInfo.endPos < m_promptSize + line.size())
+        paramStart += m_promptSize;
+        paramEnd += m_promptSize;
+
+        if (whitespaceToken && paramEnd < m_promptSize + line.size())
         {
             // Detected a new parameter, index is already updated
-            paramInfo.startPos = paramInfo.endPos + 2;
-            paramInfo.endPos = paramInfo.startPos;
+            paramStart = paramEnd + 2;
+            paramEnd = paramStart;
         }
+
+        paramInfo.startPos = paramStart;
+        paramInfo.endPos = paramEnd;
 
         return paramInfo;
     }
@@ -448,7 +472,7 @@ class Terminal
 
         // Moves to start of line
         m_position = 0;
-        m_cursorY++;
+        m_cursorY += lines;
     }
 
     // Wipes size characters ahead of current position and leaves the cursor/position be
@@ -503,7 +527,8 @@ class Terminal
 
     bool TryFinishAutoComplete()
     {
-        if (m_autoCompleteStart == std::string::npos)
+        if (m_autoCompleteStart == std::string::npos || 
+            m_position >= m_currentLine.size() + m_promptSize)
         {
             return false;
         }
@@ -577,9 +602,10 @@ class Terminal
         while (m_nextLines.size() > 0)
         {
             assert(m_cursorY <= (GetLineCount() - 1));
-            Down((GetLineCount() - 1) - m_cursorY);
-            out << std::string(m_nextLines[m_cursorY - 1].size(), ' ');
-            Up(1);
+            size_t dist = (GetLineCount() - 1) - m_cursorY;
+            Down(dist);
+            out << std::string(/*m_nextLines[m_cursorY - 1].size()*/m_terminalWidth, ' ');
+            Up(dist);
             m_nextLines.pop_back();
         }
 
@@ -651,12 +677,21 @@ public:
 
     ParamList(const Params& params) : m_params(params) {}
 
-    void Print(Terminal& t, size_t paramStartPos, size_t style)
+    // Returns lines printed
+    size_t Print(Terminal& t, size_t paramStartPos, size_t style)
     {
-        if (m_params.size() <= 1)
+        if (m_params.empty())
         {
             // TODO: Show no valid/additional completions
-            return;
+            return 0;
+        }
+
+        if (m_params.size() == 1)
+        {
+            t.AddLine(std::string(paramStartPos, ' '));
+            t.InsertText("^> ");
+            t.InsertText(m_params[0].description);
+            return 1;
         }
 
         if (style == 0)
@@ -689,52 +724,84 @@ public:
         {
             // prompt> cmd parm
             //  [.. b c d] ^ <desc text>
-            // ^          ^^ > subtract these from the width
+            // ^          ^ > subtract these from the width
             size_t width = paramStartPos - 3;
 
-            if (m_params.back().text.size() > width)
+            size_t paramCount = 0;
+            std::vector<std::string> paramList;
+            size_t spaceSize = 1;
+            size_t remainingSize = width - 2; // Subtract '[' and ']'
+            // This much remaining room is needed to squeeze one last param in.  Includes the space
+            constexpr size_t minFinalTokenWidth = 6;
             {
-                // TODO: Show no completions can be shown or abbreviate
-                return;
-            }
-
-            // We have one param to start
-            const std::string spacing = " ";
-            int paramsShown = 1;
-            size_t requiredWidth = m_params[1].text.size();
-            size_t remainingWidth = width - m_params[1].text.size();
-            for (int i = 2; i < m_params.size(); ++i)
-            {
-                size_t paramWidth = m_params[i].text.size() + spacing.size();
-                if (paramWidth > remainingWidth)
+                // See how many we can fit with 1 space
+                for (size_t i = 1; i < m_params.size(); ++i)
                 {
-                    break;
+                    const size_t size = m_params[i].text.size() + 
+                        (paramCount > 1 ? spaceSize : 0);
+                    if (remainingSize < size)
+                    {
+                        break;
+                    }
+
+                    ++paramCount;
+                    remainingSize -= size;
                 }
-                
-                ++paramsShown;
-                requiredWidth += paramWidth;
-                remainingWidth -= paramWidth;
+
+                for (size_t i = 0; i < paramCount; ++i)
+                {
+                    paramList.push_back(m_params[i + 1].text);
+                }
+
+                if (paramCount < m_params.size() &&
+                    paramCount > 0 &&   // lastCertainParam is invalid with no params
+                    remainingSize >= minFinalTokenWidth)
+                {
+                    // Cram in an abbreviated param, we have a param and room.  Leave room for a space.
+                    std::string finalParam = m_params[paramCount].text;
+                    finalParam.replace(minFinalTokenWidth - 3, 2, "..");
+                    finalParam = finalParam.substr(0, minFinalTokenWidth - 1);
+
+                    // Sneak in extra first param
+                    remainingSize -= (finalParam.size() + spaceSize);
+                    paramList.push_back(std::move(finalParam));
+                }
+                else if (paramCount > 0 && remainingSize > 0)
+                {
+                    // Fiddle with spacing instead, we can't fit anything else in
+                    size_t oldSpaceSize = spaceSize;
+                    spaceSize = oldSpaceSize + (remainingSize / paramCount);
+                    if (spaceSize > oldSpaceSize)
+                    {
+                        remainingSize = remainingSize - ((paramCount - 1) * (spaceSize - oldSpaceSize));
+                    }
+                }
             }
 
-            //    [.. b c d] ^ <desc text>
-            // ^^^ padding
-            size_t padding = width - requiredWidth;
+            std::reverse(paramList.begin(), paramList.end());
 
-            t.AddLine(std::string(padding, ' '));
+            // Extra space at the start
+            t.AddLine(std::string(remainingSize + 1, ' '));
             t.InsertText("[");
             t.out << rang::fg::blue;
-            for (int i = paramsShown; i >= 2; --i)
-            {
-                t.InsertText(m_params[i].text + " ");
-            }
-            
-            t.out << rang::fg::cyan;
-            t.InsertText(m_params[1].text);
-            t.out << rang::style::reset;
 
-            t.InsertText("] ^> ");
+            for (size_t i = 0; i < paramList.size(); ++i)
+            {
+                t.InsertText(paramList[i]);
+                if (i != paramList.size() - 1)
+                {
+                    t.InsertText(std::string(spaceSize, ' '));
+                }
+            }
+            t.out << rang::style::reset;
+            t.InsertText("] ");
+
+            t.InsertText("^> ");
             t.InsertText(m_params[0].description);
+            return 1;
         }
+
+        return 0;
     }
 
 private:
@@ -773,13 +840,13 @@ void Terminal::SetCompletions(const std::vector<AutoCompletion>& completions, co
 #endif
 
     ParamList paramList(completions);
-    paramList.Print(*this, oldPosition, 1);
+    size_t linesPrinted = paramList.Print(*this, oldPosition, 1);
 
     // Add description line
     AddLine(std::string(oldPosition, ' '));
     InsertText(cmdDesc);
 
-    Up(1);
+    Up(1 + linesPrinted);
     Advance(oldPosition);
 
     out << std::flush;

@@ -10,6 +10,7 @@
 #include "MechSim/Central/Mech.h"
 #include "MechSim/Game/Game.h"
 #include "MechSim/Misc/ObjectUtils.h"
+#include "MechSim/Misc/VectorHandle.h"
 
 namespace cli
 {
@@ -28,6 +29,13 @@ namespace cli
 	inline std::ostream& operator<<(std::ostream& os, const MechSim::Mech& mech)
 	{
 		os << Style::Mech() << mech.GetName() << " (" << mech.GetId() << ") " << reset;
+		return os;
+	}
+
+	template <typename T, typename IndexType>
+	inline std::ostream& operator<<(std::ostream& os, const Util::VectorHandle<T, IndexType>& vectorHandle)
+	{
+		os << vectorHandle.GetIndex() << reset;
 		return os;
 	}
 
@@ -158,7 +166,22 @@ namespace cli
 			{
 				return [](const MechSim::Object* obj)
 				{
-					return !!dynamic_cast<const Powerable*>(obj);
+					return !!dynamic_cast<const MechSim::Powerable*>(obj);
+				};
+			}
+		};
+
+		struct MountableByController
+		{
+			static FilterFn Get()
+			{
+				return [](const MechSim::Object* obj)
+				{
+					if (!MechSim::Game::GetInstance().m_controllerToMount)
+					{
+						return false;
+					}
+					return MechSim::Game::GetInstance().m_controllerToMount->CanControl(obj);
 				};
 			}
 		};
@@ -185,7 +208,7 @@ namespace cli
 		// Only call from safe contexts!
 		T& Get() { return *m_object; }
 
-		MechSim::ObjectId GetId() { return m_object ? m_object->GetId() : MechSim::NullId; }
+		MechSim::ObjectId GetId() const { return m_object ? m_object->GetId() : MechSim::NullId; }
 
 		MechSim::Object* GetObj() { return dynamic_cast<MechSim::Object*>(m_object); }
 		const MechSim::Object* GetObj() const { return dynamic_cast<MechSim::Object*>(m_object); }
@@ -194,17 +217,48 @@ namespace cli
 		T* m_object = nullptr;
 	};
 	
+	template <typename T, typename FilterFnObj>
+	inline std::ostream& operator<<(std::ostream& os, const FilteredObjParam<T, FilterFnObj>& objParam)
+	{
+		if (!objParam.GetObj())
+		{
+			os << Style::Object() << " (" << objParam.GetId() << ")" << reset;
+			return os;
+		}
+
+		os << Style::Object() << objParam.GetObj()->GetName() << " (" << objParam.GetId() << ")" << reset;
+		return os;
+	}
+
 	template <typename T>
 	using ObjParam = FilteredObjParam<T, ObjFilters::None>;
 
 	using Powerable = FilteredObjParam<MechSim::Object, ObjFilters::Powerable>;
-
-	template <typename T>
-	inline std::ostream& operator<<(std::ostream& os, const ObjParam<T>& object)
+	
+	class PartName
 	{
-		os << Style::Object() << typeid(T).name() << reset;
-		return os;
-	}
+	public:
+		bool Create(std::ostream& out, const std::string& paramName, const std::string& partName)
+		{
+			m_part = MechSim::GetObjectRegistry().FindMechClass<MechSim::Part>(partName);
+			if (!m_part)
+			{
+				m_name.clear();
+				out << paramName << ": received invalid part name '" << partName << "'\n";
+				return false;
+			}
+
+			m_name = partName;
+			return true;
+		}
+
+		std::string GetName() const { return m_name; }
+
+	private:
+		// Part doesn't actually have the class name...
+		std::string m_name;
+		const MechSim::Part* m_part;
+	};
 
 	class Id
 	{
@@ -223,15 +277,6 @@ namespace cli
 			}
 			out << paramName << ": received invalid id " << idStr << "\n";
 			return false;
-		}
-
-		static Id Create(const std::string& idStr)
-		{
-			if (auto val = MechSim::ReadInt(idStr); val)
-			{
-				return Id(static_cast<size_t>(*val));
-			}
-			return Id();
 		}
 
 	protected:
@@ -270,7 +315,7 @@ namespace cli
 		static AutoCompleter::Completions GetCompletions()
 		{
 			AutoCompleter::Completions results;
-			auto& circuits = MechSim::GetMech().m_circuits;
+			auto& circuits = MechSim::GetMech().GetAllCircuits();
 			for (size_t i = 0; i < circuits.size(); ++i)
 			{
 				const auto& circuit = circuits[i];
@@ -290,7 +335,7 @@ namespace cli
 			}
 
 			const auto& mech = MechSim::GetMech();
-			if (id >= mech.m_circuits.size())
+			if (id >= mech.GetAllCircuits().size())
 			{
 				return false;
 			}
@@ -299,24 +344,28 @@ namespace cli
 		}
 	};
 
-	template <typename InT, typename Enable>
-	class ObjectAutoCompleter;
-
-	template <typename InT>
-	class ObjectAutoCompleter<InT, void>
+	class ReactorPlug : public Id
 	{
 	public:
-		ObjectAutoCompleter() = default;
-		bool HasValues() const { return false; }
-		size_t Size() const { return 0; }
-
-		std::vector<std::string> GetAutoCompletions(size_t cur) const
+		static AutoCompleter::Completions GetCompletions()
 		{
-			return {};
+			AutoCompleter::Completions results;
+			const auto& plugs = MechSim::GetMech().GetReactor()->GetPlugs();
+			for (size_t i = 0; i < plugs.size(); ++i)
+			{
+				std::stringstream str;
+				str << i << " (" << plugs[i].m_voltage << ")";
+				results.push_back({ std::to_string(i), str.str() });
+			}
+			return results;
+		}
+
+	protected:
+		bool Validate(size_t id) const override
+		{
+			return id < MechSim::GetMech().GetReactor()->ConnectionCount;
 		}
 	};
-
-	
 
 	template <typename T, typename Enable>
 	struct ParamAutoComplete;
@@ -332,7 +381,7 @@ namespace cli
 
 	template <typename T>
 	struct ParamAutoComplete<T,
-							 typename std::enable_if_t<std::is_base_of<MechSim::Object, std::decay_t<T>>::value>
+							 std::enable_if_t<std::is_base_of<MechSim::Object, std::decay_t<T>>::value>
 							>
 	{
 		static AutoCompleter Get()
@@ -369,12 +418,28 @@ namespace cli
 
 	template <typename T>
 	struct ParamAutoComplete<T,
-							 typename std::enable_if_t<std::is_base_of<Id, std::decay_t<T>>::value>
+							 std::enable_if_t<std::is_base_of<Id, std::decay_t<T>>::value>
 							>
 	{
 		static AutoCompleter Get()
 		{
 			AutoCompleter::Completions completions = T::GetCompletions();
+			return AutoCompleter(std::move(completions));
+		}
+	};
+
+	template <>
+	struct ParamAutoComplete<PartName>
+	{
+		static AutoCompleter Get()
+		{
+			AutoCompleter::Completions completions;
+			const auto& rawCompletions = MechSim::GetObjectRegistry().GetAutoCompletions("");
+			for (const auto& completion : rawCompletions)
+			{
+				completions.push_back({ completion.first, completion.second->GetName() });
+			}
+			// TODO: Pass param string to Get() to filter
 			return AutoCompleter(std::move(completions));
 		}
 	};
@@ -409,6 +474,28 @@ namespace cli
 			static CircuitId get(std::ostream& out, const std::string& param, const std::string& s)
 			{
 				CircuitId result;
+				result.Create(out, param, s);
+				return result;
+			}
+		};
+
+		template <>
+		struct FromString<ReactorPlug>
+		{
+			static ReactorPlug get(std::ostream& out, const std::string& param, const std::string& s)
+			{
+				ReactorPlug result;
+				result.Create(out, param, s);
+				return result;
+			}
+		};
+
+		template <>
+		struct FromString<PartName>
+		{
+			static PartName get(std::ostream& out, const std::string& param, const std::string& s)
+			{
+				PartName result;
 				result.Create(out, param, s);
 				return result;
 			}
