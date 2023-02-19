@@ -236,16 +236,18 @@ namespace cli
 
     // ********************************************************************
     // free utility function to get completions from a list of commands and the current line
+#if 0
     inline AutoCompleter::Completions GetCompletions(
         const std::shared_ptr<std::vector<std::shared_ptr<Command>>>& cmds,
-        const std::string& currentLine,
-        size_t param)
+        const std::vector<std::string>& params,
+        const size_t currentParam,
+        const size_t inputParam)
     {
         AutoCompleter::Completions result;
         std::for_each(cmds->begin(), cmds->end(),
-            [&currentLine, &result, param](const auto& cmd)
+            [currentParam, inputParam, &result, &params = std::as_const(params)](const auto& cmd)
             {
-                auto c = cmd->GetCompletionRecursive(currentLine, param);
+                auto c = cmd->GetCompletions(params, currentParam, inputParam);
                 std::for_each(c.begin(), c.end(), [&result](const auto& completion)
                     {
                         result.push_back(completion);
@@ -253,6 +255,7 @@ namespace cli
             });
         return result;
     }
+#endif
 
     // ********************************************************************
 
@@ -317,7 +320,7 @@ namespace cli
 
         virtual bool Exec(const std::vector<std::string>& cmdLine, CliSession& session);
 
-        bool ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session);
+        size_t ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session);
         Command* FindCommand(const std::vector<std::string>& cmdLine);
 
         std::string Prompt() const
@@ -346,77 +349,194 @@ namespace cli
         // - the completions of this menu command
         // - the recursive completions of subcommands
         // - the recursive completions of parent menu
-
-        AutoCompleter::Completions GetCompletions(const std::string& currentLine, size_t param) const
+#if 0
+        AutoCompleter::Completions GetCompletions(const std::vector<std::string>& params,
+            const size_t param) const
         {
-            auto result = cli::GetCompletions(cmds, currentLine, param);
-
-            //auto selfComplete = GetCompletionRecursive(currentLine, param);
-            //result.insert(result.end(), std::make_move_iterator(selfComplete.begin()), std::make_move_iterator(selfComplete.end()));
-
-            if (parent != nullptr && param == 0)
+            assert(param < params.size());
+            
+            AutoCompleter::Completions result;
+            if (MatchCommand(params[currentParam]))
             {
-                auto c = parent->GetCompletionRecursive(currentLine, param);
-                //result.insert(result.end(), std::make_move_iterator(c.begin()), std::make_move_iterator(c.end()));
-                std::for_each(c.begin(), c.end(), [&result](const detail::AutoCompletion& completion)
-                    {
-                        result.push_back(completion);
-                    });
+                std::string completionText;
+                std::for_each(params.begin(), params.begin() + currentParam,
+                    [&completionText](const auto& str) { completionText += str + " "; });
+
+                size_t nextParam = currentParam + 1;
+                while (nextParam <= (currentParam + GetParamCount()))
+                {
+                    auto completion = GetParamCompletion(params, nextParam);
+                    completionText
+                    result.push_back();
+                }
+                const size_t paramCount = GetParamCount();
+                if (currentParam < paramCount)
+                {
+                    result = cli::GetCompletions(cmds, params, currentParam + 1, inputParam);
+                }
             }
+            else if (StartsWith(params[param]))
+            {
+                result.push_back({ Name(), Description() });
+            }
+
             return result;
         }
+#endif
 
-        // Returns true if line matches for this command
-        bool MatchCommand(const std::string& line) const
+        AutoCompleter::Completions GetChildCommandCompletions(const std::string& prefix)
         {
             if (!enabled) { return {}; }
 
-            std::string nameOnly = line;
-            size_t tokenEnd = 0;
-            while (tokenEnd < nameOnly.size() && !std::isspace(nameOnly[tokenEnd]))
+            AutoCompleter::Completions completions;
+            for (auto& cmd : *cmds)
             {
-                ++tokenEnd;
+                if (cmd->Name().find(prefix) == 0)
+                {
+                    completions.push_back({ cmd->Name(), cmd->Description() });
+                }
             }
-            nameOnly = nameOnly.substr(0, tokenEnd);
-
-            return Name().find(nameOnly) == 0; // line starts_with Name()
+            return completions;
         }
 
-        // Returns the collection of completions relatives to this command.
-        // For simple commands, provides a base implementation that use the name of the command
-        // for aggregate commands (i.e., Menu), the function is redefined to give the menu command
-        // and the subcommand recursively
-        // returns:
-        // - the completion of this menu command
-        // - the recursive completions of the subcommands
-        virtual AutoCompleter::Completions GetCompletionRecursive(const std::string& line, size_t param)
+        using CommandParams = std::pair<std::reference_wrapper<Command>, size_t>;
+
+        std::vector<CommandParams> GetCommands(std::vector<std::string> params, size_t currentParam)
         {
-            if (!MatchCommand(line))
+            //size_t currentParamCount = currentParam + 1;
+            size_t param = 0;
+            for (auto& cmd : *cmds)
+            {
+                auto cmdResults = cmd->GetCommandsImpl(params, param);
+                if (!cmdResults.empty())
+                {
+                    if (cmdResults.size() > 1)
+                    {
+                        // Can't guess at which command is right, so return what we got
+                        return cmdResults;
+                    }
+
+                    // Single command?  Let's try to complete children
+                    auto results = cmdResults;
+                    auto& foundCommand = results[0].first.get();
+                    params.erase(params.begin(), params.begin() + results[0].second);
+                    
+                    if (results[0].second == foundCommand.GetParamCount())
+                    {
+                        auto childResult = foundCommand.GetCommands(params, currentParam);
+                        results.insert(results.end(), childResult.begin(), childResult.end());
+                        
+                    }
+                    
+                    //param += results[0].second;
+                    //currentParamCount -= results[0].second;
+                    return results;
+                }
+            }
+            return {};
+        }
+
+        std::vector<CommandParams> GetCommandsImpl(const std::vector<std::string>& params,
+            const size_t currentParam)
+        {
+            if (params.empty())
             {
                 return {};
             }
 
-            auto rest = line;
-            rest.erase(0, Name().size());
-            // trim_left(rest);
-            rest.erase(rest.begin(), std::find_if(rest.begin(), rest.end(), [](int ch) { return !std::isspace(ch); }));
-            AutoCompleter::Completions result;
-            for (const auto& cmd : *cmds)
+            size_t paramCount = MatchCommand(params);
+            if (paramCount == 0)
             {
-                auto cs = cmd->GetCompletionRecursive(rest, param);
-                for (const auto& c : cs)
+                return {};
+            }
+
+            std::vector<CommandParams> commands;
+            commands.push_back({ *this, std::min(GetParamCount(), params.size()) });
+
+            size_t nextParam = currentParam + paramCount;
+            // If we have enough paramaters and still have more param input left, keep going
+            if (paramCount == GetParamCount() && nextParam < params.size() && cmds)
+            {
+                // See if there are child commands
+                for (auto& cmd : *cmds)
                 {
-                    result.push_back({ Name() + ' ' + c.text, "" }); // concat submenu with command
+                    auto results = cmd->GetCommandsImpl(params, nextParam);
+                    if (!results.empty())
+                    {
+                        commands.insert(commands.end(), results.begin(), results.end());
+                        // Command names should be unique
+                        break;
+                    }
                 }
             }
 
-            if (!result.empty())
+            return commands;
+        }
+
+        // Returns true if param is this command
+        bool MatchCommandName(const std::string& param) const
+        {
+            if (!enabled) { return false; }
+            return Name() == param;
+        }
+
+        // Returns how many parameters to eat, returns 0 if there is no match
+        size_t MatchCommand(const std::vector<std::string>& params) const
+        {
+            if (!enabled) { return 0; }
+            if (!MatchCommandName(params[0]))
             {
-                result.push_back({ Name(), description });
-                return result;
+                return 0;
             }
 
-            return { { Name(), description } };
+            // We have some number of params, may be incomplete
+            size_t i;
+            for (i = 0; i < GetParamCount() - 1; ++i)
+            {
+                auto param = i + 1;
+                if (param >= params.size())
+                {
+                    break;
+                }
+
+                if (!ValidateParam(params[param], i))
+                {
+                    return i - 1;
+                }
+            }
+
+            // Include param name
+            return i + 1;
+        }
+
+        // Returns true if this command starts with param
+        bool StartsWith(const std::string& param) const
+        {
+            if (!enabled) { return {}; }
+            if (param.empty())
+            {
+                // If we have nothing, then say an empty string matches
+                return true;
+            }
+            return param.find(Name()) == 0;
+        }
+
+        virtual AutoCompleter::Completions GetParamCompletion(const std::string& paramStr,
+            const size_t param)
+        {
+            // On a pure menu, complete for our children, but can _only_ complete our single child param
+            assert(param == 0);
+
+            AutoCompleter::Completions results;
+            for (auto& cmd : *cmds)
+            {
+                if (paramStr.empty() || cmd->StartsWith(paramStr))
+                {
+                    results.push_back({ cmd->Name(), cmd->Description() });
+                }
+            }
+
+            return results;
         }
 
         template <typename F>
@@ -439,6 +559,12 @@ namespace cli
 
         const std::string& Name() const { return name; }
         const std::string& Description() const { return description; }
+
+        // Includes this name
+        virtual size_t GetParamCount() const { return 1; }
+        virtual bool ValidateParam(const std::string& param, const size_t paramIndex) const { return false; }
+
+        size_t m_commandAutoCompleteIndex = 0;
 
     protected:
         bool IsEnabled() const { return enabled; }
@@ -518,7 +644,7 @@ namespace cli
         const Command* GetCurrentCommand(const std::string& line) const;
 
         detail::AutoCompletion GetCurrentCommandCompletion(const std::string& line) const;
-        AutoCompleter::Completions GetCompletions(std::string currentLine, size_t param) const;
+        AutoCompleter::Completions GetCompletions(std::string currentLine, size_t param);
 
     private:
         virtual void SetPromptSize(size_t size) {}
@@ -794,21 +920,18 @@ namespace cli
             }
         }
 
-        AutoCompleter::Completions GetCompletionRecursive(const std::string& currentLine, size_t param) override
-        {
+        AutoCompleter::Completions GetParamCompletion(const std::string& paramStr,
+            const size_t param) override
+        {   
             if (param == 0)
             {
-                // Complete for our own name
-                return Command::GetCompletionRecursive(currentLine, param);
+                return Command::GetParamCompletion(paramStr, param);
             }
 
-            if (!MatchCommand(currentLine))
-            {
-                return {};
-            }
-
+            // TODO: Is this always true?
             if constexpr (sizeof...(Args) > 0)
             {
+                // TODO: This current assumes the typed data in paramStr has no affect
                 const size_t zeroIndexedParam = param - 1;
                 AutoCompleter autoCompleter = ParamUtil<Args...>::CallWith<ParamAutoComplete>(zeroIndexedParam);
 
@@ -824,6 +947,15 @@ namespace cli
             {
                 return {};
             }
+        }
+
+        // paramIndex of 0 means first param, not command name
+        bool ValidateParam(const std::string& param, const size_t paramIndex) const override
+        {
+            // TODO: Hmmmm, maybe this can go away
+            return paramIndex < GetParamCount() - 1;
+            //AutoCompleter autoCompleter = ParamUtil<Args...>::CallWith<ParamAutoComplete>(paramIndex);
+            //return autoCompleter.HasValues();
         }
 
         bool Exec(const std::vector< std::string >& cmdLine, CliSession& session) override
@@ -869,6 +1001,8 @@ namespace cli
 
             out << ")\n\t" << description << "\n";
         }
+
+        size_t GetParamCount() const override { return 1 + sizeof...(Args); }
 
     private:
         const F func;
@@ -934,6 +1068,11 @@ namespace cli
             out << "\n\t" << description << "\n";
         }
 
+        size_t GetParamCount() const override { return std::numeric_limits<size_t>::max(); }
+        bool ValidateParam(const std::string& param, const size_t paramIndex) const override
+        {
+            return true;
+        }
     private:
 
         const F func;
@@ -991,13 +1130,26 @@ namespace cli
         {
 
             // global cmds check
-            bool found = current->ScanCmds(strs, *this);
+            size_t executed = current->ScanCmds(strs, *this);
 
             // root menu recursive cmds check
-            if (!found) found = globalScopeMenu->ScanCmds(strs, *this);
+            if (executed == 0)
+            {
+                executed = globalScopeMenu->ScanCmds(strs, *this);
+            }
 
-            if (!found) // error msg if not found
+            if (executed == 0)
+            {
                 out << "Command '" << strs[0] << "' not found.\n";
+            }
+            else if (executed > 1)
+            {
+                // - 1 because the leaf command isn't a menu
+                for (size_t i = 0; i < executed - 1; ++i)
+                {
+                    Exit();
+                }
+            }
         }
         catch(const std::exception& e)
         {
@@ -1016,7 +1168,11 @@ namespace cli
         std::vector<std::string> strs;
         detail::split(strs, line);
 
-        //const_cast<CliSession*>(this)->FindCommand(strs);
+        if (strs.empty())
+        {
+            return nullptr;
+        }
+
         if (auto* command = current->FindCommand(strs))
         {
             return command;
@@ -1064,22 +1220,82 @@ namespace cli
         exit = true; // prevent the prompt to be shown
     }
 
-    inline AutoCompleter::Completions CliSession::GetCompletions(std::string currentLine, size_t param) const
+    inline AutoCompleter::Completions CliSession::GetCompletions(std::string currentLine, const size_t param)
     {
+        std::vector<std::string> params;
+        detail::split(params, currentLine);
 
-        // trim_left(currentLine);
-        currentLine.erase(currentLine.begin(), std::find_if(currentLine.begin(), currentLine.end(), [](int ch) { return !std::isspace(ch); }));
-        auto v1 = globalScopeMenu->GetCompletions(currentLine, param);
-        auto v3 = current->GetCompletions(currentLine, param);
-        v1.insert(v1.end(), std::make_move_iterator(v3.begin()), std::make_move_iterator(v3.end()));
+        auto commands = current->GetCommands(params, param);
 
-        // I specifically don't want sorting for new auto-complete
-        // removes duplicates (std::unique requires a sorted container)
-        //std::sort(v1.begin(), v1.end());
-        //auto ip = std::unique(v1.begin(), v1.end());
-        //v1.resize(static_cast<std::size_t>(std::distance(v1.begin(), ip)));
+        size_t currentParam = 0;
+        std::for_each(commands.begin(), commands.end(),
+            [&currentParam](const auto& pair) { currentParam += pair.second; });
 
-        return v1;
+        if (commands.empty())
+        {
+            auto completions = current->GetChildCommandCompletions("");
+            // Rotate completion logic
+            current->m_commandAutoCompleteIndex = (current->m_commandAutoCompleteIndex + 1) % completions.size();
+            completions.insert(completions.end(), completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
+            completions.erase(completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
+            return completions;
+        }
+
+        // It's not possible to do menu auto-complete within the menu command as it doesn't know about
+        // its peers.  If the second value - param count provided - is 0, then do this work.
+        if (commands.back().second == commands.back().first.get().GetParamCount())
+        {
+            // TODO: This won't work with filters
+            auto completions = commands.back().first.get().GetChildCommandCompletions(
+                currentParam >= params.size() ? "" : params[currentParam]);
+
+            // Rotate completion logic
+            current->m_commandAutoCompleteIndex = (current->m_commandAutoCompleteIndex + 1) % completions.size();
+            completions.insert(completions.end(), completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
+            completions.erase(completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
+            return completions;
+        }
+
+        bool valid = true;
+        size_t exitsRequired = 0;
+        size_t paramOffset = 0;
+        for (size_t i = 0; i < commands.size(); ++i)
+        {
+            Command& cmd = commands[i].first.get();
+
+            if (paramOffset + commands[i].second >= params.size())
+            {
+                break;
+            }
+
+            std::vector<std::string> localParams;
+            localParams.assign(params.begin() + paramOffset,
+                params.begin() + paramOffset + commands[i].second);
+            paramOffset += cmd.GetParamCount();
+
+            if (!cmd.Exec(localParams, *this))
+            {
+                valid = false;
+                break;
+            }
+
+            ++exitsRequired;
+        }
+
+        AutoCompleter::Completions results;
+        // TODO: This validity logic might be wrong
+        if (valid)
+        {
+            results = commands.back().first.get().GetParamCompletion(param >= params.size() ? "" : params[param],
+                (param - paramOffset));
+        }
+
+        for (size_t i = 0; i < exitsRequired; ++i)
+        {
+            Exit();
+        }
+
+        return results;
     }
 
     detail::AutoCompletion CliSession::GetCurrentCommandCompletion(const std::string& line) const
@@ -1151,32 +1367,44 @@ namespace cli
         return false;
     }
 
-    bool Command::ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session)
+    size_t Command::ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session)
     {
         if (!IsEnabled())
-            return false;
-        for (auto& cmd : *cmds)
+            return 0;
+
+        auto commands = GetCommands(cmdLine, 0);
+        size_t requiredParams = 0;
+        for (const auto& cmdPair : commands)
         {
-            auto validationResult = cmd->Validate(cmdLine);
-            if (validationResult == Command::ValidationResult::Invalid)
-            {
-                session.OutStream() << "Invalid parameters.\n";
-                cmd->Help(session.OutStream());
-
-                // Command was found, execution just failed
-                return true;
-            }
-            else if (validationResult == Command::ValidationResult::NoMatch)
-            {
-                continue;
-            }
-
-            if (cmd->Exec(cmdLine, session))
-            {
-                return true;
-            }
+            requiredParams += cmdPair.first.get().GetParamCount();
         }
-        return (parent && parent->Exec(cmdLine, session));
+
+        if (requiredParams < cmdLine.size())
+        {
+            return 0;
+        }
+
+        size_t executed = 0;
+        size_t paramOffset = 0;
+        for (size_t i = 0; i < commands.size(); ++i)
+        {
+            Command& cmd = commands[i].first.get();
+
+            std::vector<std::string> localParams;
+            localParams.assign(cmdLine.begin() + paramOffset, 
+                cmdLine.begin() + paramOffset + commands[i].second);
+
+            paramOffset += commands[i].second;
+
+            if (!cmd.Exec(localParams, session))
+            {
+                // We still executed _something_, it just failed
+                break;
+            }
+            ++executed;
+        }
+
+        return executed;
     }
 
     Command* Command::FindCommand(const std::vector<std::string>& cmdLine)

@@ -98,16 +98,19 @@ private:
             }
             case Symbol::tab:
             {
-                auto line = terminal.GetLine();
-                size_t paramIndex = terminal.GetParamIndex(line);
-                auto completions = session.GetCompletions(line, paramIndex);
+                //auto line = terminal.GetLine();
+                //size_t paramIndex = terminal.GetParamIndex(line);
+                auto lineInfo = terminal.GetAutoCompleteLine();
+                size_t paramIndex = lineInfo.second;
+
+                auto completions = session.GetCompletions(lineInfo.first, lineInfo.second);
 
                 if (completions.empty())
                     break;
 
                 // This should perhaps be somehow generalized to "user typed input for this param" but
                 // for now turn on common prefix matching for top level command completion
-                if (paramIndex == 0)
+                /* if (paramIndex == 0)
                 {
                     // TODO: Set up command completion/command as first class citizens
                     if (completions.size() == 1)
@@ -117,21 +120,26 @@ private:
                     }
 
                     auto commonPrefix = CommonPrefix(GetTextCompletions(completions));
-                    if (commonPrefix.size() > line.size())
+                    if (commonPrefix.size() > lineInfo.first.size())
                     {
                         terminal.SetLine(commonPrefix);
                         break;
                     }
-                }
+                } */
 
-                auto cmdCompletion = session.GetCurrentCommandCompletion(line);
+                auto cmdCompletion = session.GetCurrentCommandCompletion(lineInfo.first);
 
+                // We're completing a parameter for a command
+                /*
                 std::vector<AutoCompletion> autoCompletions;
                 std::for_each(completions.begin(), completions.end(), [&autoCompletions](auto& cmd)
                     {
                         autoCompletions.push_back(cmd);
                     });
-                terminal.SetCompletions(autoCompletions, cmdCompletion.description);
+                    */
+                terminal.SetCompletions(completions, cmdCompletion.description);
+
+                
 
 #ifdef OLD_AUTOCOMPLETE
                 if (completions.size() == 1)
