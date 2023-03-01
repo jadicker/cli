@@ -64,14 +64,14 @@ namespace Style
 {
     using FGColor = StyleHelper<detail::rang::fg>;  
     
-    FGColor Command() { return FGColor(detail::rang::fg::gray, detail::rang::style::italic); }
-    FGColor Parameter() { return FGColor(detail::rang::fg::cyan); }
-    FGColor ObjectId() { return FGColor(detail::rang::fg::green); }
-    FGColor Object() { return FGColor(detail::rang::fg::cyan); }
-    FGColor Mech() { return FGColor(detail::rang::fg::yellow); }
+    inline FGColor Command() { return FGColor(detail::rang::fg::gray, detail::rang::style::italic); }
+    inline FGColor Parameter() { return FGColor(detail::rang::fg::cyan); }
+    inline FGColor ObjectId() { return FGColor(detail::rang::fg::green); }
+    inline FGColor Object() { return FGColor(detail::rang::fg::cyan); }
+    inline FGColor Mech() { return FGColor(detail::rang::fg::yellow); }
 
-    FGColor Green() { return FGColor(detail::rang::fg::green); }
-    FGColor Red() { return FGColor(detail::rang::fg::red); }
+    inline FGColor Green() { return FGColor(detail::rang::fg::green); }
+    inline FGColor Red() { return FGColor(detail::rang::fg::red); }
 }
 
 inline std::ostream& operator<<(std::ostream& os, BeforePrompt)

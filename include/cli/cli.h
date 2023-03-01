@@ -48,6 +48,8 @@
 
 #include "mechsimtypes.h"
 
+class ConsoleTestRunner;
+
 namespace cli
 {
     // ********************************************************************
@@ -71,11 +73,16 @@ namespace cli
     template <> struct TypeDesc< std::string > { static const char* Name() { return "<string>"; } };
     template <> struct TypeDesc< std::vector<std::string> > { static const char* Name() { return "<list of strings>"; } };
     
-    template <> struct TypeDesc<Powerable> { static const char* Name() { return "Powerable"; } };
-    template <> struct TypeDesc<MechId> { static const char* Name() { return "MechId"; } };
-    template <> struct TypeDesc<CircuitId> { static const char* Name() { return "CircuitId"; } };
-    template <> struct TypeDesc<ReactorPlug> { static const char* Name() { return "ReactorPlug"; } };
-    template <> struct TypeDesc<PartName> { static const char* Name() { return "PartName"; } };
+#define NAME_BASIC_TYPE(typeName) template <> struct TypeDesc<##typeName##> { static const char* Name() { return #typeName; } };
+    NAME_BASIC_TYPE(Powerable);
+    NAME_BASIC_TYPE(MechId);
+    NAME_BASIC_TYPE(CircuitId);
+    NAME_BASIC_TYPE(ReactorPlug);
+    NAME_BASIC_TYPE(PartName);
+    NAME_BASIC_TYPE(Joystick);
+    NAME_BASIC_TYPE(Axis);
+#undef NAME_BASIC_TYPE
+
     template <> struct TypeDesc<FilteredObjParam<MechSim::Part, ObjFilters::MountableByController>> { static const char* Name() { return "Controllable"; } };
 
     template <typename T, typename Fn>
@@ -133,7 +140,7 @@ namespace cli
 
     class Cli
     {
-
+        friend class ConsoleTestRunner;
 
     public:
         ~Cli() = default;
@@ -156,11 +163,15 @@ namespace cli
          * 
          * However, you can develop your own, just derive a class from @c HistoryStorage .
          */
-        Cli(std::unique_ptr<Command> _rootMenu, std::unique_ptr<HistoryStorage> historyStorage = std::make_unique<VolatileHistoryStorage>()) :
+        Cli(std::unique_ptr<HistoryStorage> historyStorage = std::make_unique<VolatileHistoryStorage>()) :
             globalHistoryStorage(std::move(historyStorage)),
-            rootMenu(std::move(_rootMenu)),
             exitAction{}
         {
+        }
+
+        void SetRootMenu(std::shared_ptr<Command> inRootMenu)
+        {
+            rootMenu = inRootMenu;
         }
 
         /**
@@ -229,7 +240,7 @@ namespace cli
 
     private:
         std::unique_ptr<HistoryStorage> globalHistoryStorage;
-        std::unique_ptr<Command> rootMenu; // just to keep it alive
+        std::shared_ptr<Command> rootMenu;
         std::function<void(std::ostream&)> exitAction;
         std::function<void(std::ostream&, const std::string& cmd, const std::exception& )> exceptionHandler;
     };
@@ -299,16 +310,13 @@ namespace cli
         {
             assert(other.cmds && cmds);
             auto& otherCmds = *other.cmds;
-            for (auto iter = otherCmds.begin(); iter != otherCmds.end();)
+            for (auto iter = otherCmds.begin(); iter != otherCmds.end(); ++iter)
             {
                 if (dynamic_cast<const Command*>(iter->get()))
                 {
                     cmds->push_back(*iter);
-                    iter = otherCmds.erase(iter);
-                    continue;
+                    //iter = otherCmds.erase(iter);
                 }
-
-                ++iter;
             }
         }
 
@@ -320,8 +328,19 @@ namespace cli
 
         virtual bool Exec(const std::vector<std::string>& cmdLine, CliSession& session);
 
-        size_t ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session);
-        Command* FindCommand(const std::vector<std::string>& cmdLine);
+        virtual void ResetAutoComplete() { }
+
+        void ResetAutoCompleteRecursive()
+        {
+            ResetAutoComplete();
+            for (auto& cmd : *cmds)
+            {
+                cmd->ResetAutoCompleteRecursive();
+            }
+        }
+
+        using ScanResult = std::pair<std::vector<const Command*>, bool /* executed */>;
+        ScanResult ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session);
 
         std::string Prompt() const
         {
@@ -345,45 +364,6 @@ namespace cli
             out << " - " << Name() << "\n\t" << description << "\n";
         }
 
-        // returns:
-        // - the completions of this menu command
-        // - the recursive completions of subcommands
-        // - the recursive completions of parent menu
-#if 0
-        AutoCompleter::Completions GetCompletions(const std::vector<std::string>& params,
-            const size_t param) const
-        {
-            assert(param < params.size());
-            
-            AutoCompleter::Completions result;
-            if (MatchCommand(params[currentParam]))
-            {
-                std::string completionText;
-                std::for_each(params.begin(), params.begin() + currentParam,
-                    [&completionText](const auto& str) { completionText += str + " "; });
-
-                size_t nextParam = currentParam + 1;
-                while (nextParam <= (currentParam + GetParamCount()))
-                {
-                    auto completion = GetParamCompletion(params, nextParam);
-                    completionText
-                    result.push_back();
-                }
-                const size_t paramCount = GetParamCount();
-                if (currentParam < paramCount)
-                {
-                    result = cli::GetCompletions(cmds, params, currentParam + 1, inputParam);
-                }
-            }
-            else if (StartsWith(params[param]))
-            {
-                result.push_back({ Name(), Description() });
-            }
-
-            return result;
-        }
-#endif
-
         AutoCompleter::Completions GetChildCommandCompletions(const std::string& prefix)
         {
             if (!enabled) { return {}; }
@@ -399,9 +379,13 @@ namespace cli
             return completions;
         }
 
-        using CommandParams = std::pair<std::reference_wrapper<Command>, size_t>;
+        struct CommandParams
+        {
+            std::reference_wrapper<Command> m_command;
+            size_t m_paramsFound;
+        };
 
-        std::vector<CommandParams> GetCommands(std::vector<std::string> params, size_t currentParam)
+        std::vector<CommandParams> GetCommands(std::vector<std::string> params, size_t currentParam = 0) const
         {
             //size_t currentParamCount = currentParam + 1;
             size_t param = 0;
@@ -418,18 +402,15 @@ namespace cli
 
                     // Single command?  Let's try to complete children
                     auto results = cmdResults;
-                    auto& foundCommand = results[0].first.get();
-                    params.erase(params.begin(), params.begin() + results[0].second);
+                    auto& foundCommand = results[0].m_command.get();
+                    params.erase(params.begin(), params.begin() + results[0].m_paramsFound);
                     
-                    if (results[0].second == foundCommand.GetParamCount())
+                    if (results[0].m_paramsFound == foundCommand.GetParamCount() && !params.empty())
                     {
-                        auto childResult = foundCommand.GetCommands(params, currentParam);
+                        auto childResult = foundCommand.GetCommands(params, currentParam + foundCommand.GetParamCount());
                         results.insert(results.end(), childResult.begin(), childResult.end());
-                        
                     }
                     
-                    //param += results[0].second;
-                    //currentParamCount -= results[0].second;
                     return results;
                 }
             }
@@ -437,13 +418,8 @@ namespace cli
         }
 
         std::vector<CommandParams> GetCommandsImpl(const std::vector<std::string>& params,
-            const size_t currentParam)
+            const size_t currentParam) const
         {
-            if (params.empty())
-            {
-                return {};
-            }
-
             size_t paramCount = MatchCommand(params);
             if (paramCount == 0)
             {
@@ -451,7 +427,7 @@ namespace cli
             }
 
             std::vector<CommandParams> commands;
-            commands.push_back({ *this, std::min(GetParamCount(), params.size()) });
+            commands.push_back({ *const_cast<Command*>(this), std::min(GetParamCount(), params.size()) });
 
             size_t nextParam = currentParam + paramCount;
             // If we have enough paramaters and still have more param input left, keep going
@@ -473,6 +449,14 @@ namespace cli
             return commands;
         }
 
+        std::vector<CommandParams> GetCurrentCommands(const std::string& commandLine) const
+        {
+            std::vector<std::string> params;
+            detail::split(params, commandLine);
+
+            return GetCommands(params, 0);
+        }
+
         // Returns true if param is this command
         bool MatchCommandName(const std::string& param) const
         {
@@ -484,7 +468,8 @@ namespace cli
         size_t MatchCommand(const std::vector<std::string>& params) const
         {
             if (!enabled) { return 0; }
-            if (!MatchCommandName(params[0]))
+
+            if (params.empty() || !MatchCommandName(params[0]))
             {
                 return 0;
             }
@@ -598,6 +583,8 @@ namespace cli
 
     class CliSession
     {
+        friend class ConsoleTestRunner;
+
     public:
         CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize = 100);
         virtual ~CliSession() noexcept { coutPtr->UnRegister(out); }
@@ -609,14 +596,26 @@ namespace cli
         CliSession(CliSession&&) = delete;
         CliSession& operator = (CliSession&&) = delete;
 
-        void Feed(const std::string& cmd);
+        bool Feed(const std::string& cmd, bool silent = false);
 
         void Prompt()
         {
             SetPromptSize(PromptImpl());
         }
 
-        void Current(Command* menu) { current = menu; }
+        void SetRootMenu(std::shared_ptr<Command> inRootMenu)
+        {
+            currentGlobalScopeMenu.reset(new Command(""));
+            currentGlobalScopeMenu->TransferRootCommands(*inRootMenu);
+            cli.SetRootMenu(inRootMenu);
+
+            current = inRootMenu.get();
+        }
+
+        void Current(Command* menu)
+        {
+            current = menu;
+        }
 
         std::ostream& OutStream() { return out; }
 
@@ -644,7 +643,14 @@ namespace cli
         const Command* GetCurrentCommand(const std::string& line) const;
 
         detail::AutoCompletion GetCurrentCommandCompletion(const std::string& line) const;
-        AutoCompleter::Completions GetCompletions(std::string currentLine, size_t param);
+
+        struct CompletionResults
+        {
+            const Command* m_command;
+            size_t m_completionParamIndex;
+            AutoCompleter::Completions m_completions;
+        };
+        CompletionResults GetCompletions(std::string currentLine, size_t param);
 
     private:
         virtual void SetPromptSize(size_t size) {}
@@ -653,6 +659,9 @@ namespace cli
         Cli& cli;
         std::shared_ptr<cli::OutStream> coutPtr;
         Command* current;
+        // Globals attached to current
+        std::unique_ptr<Command> currentGlobalScopeMenu;
+        // Globals attached to the CLI
         std::unique_ptr<Command> globalScopeMenu;
         std::ostream& out;
         std::function< void(std::ostream&)> exitAction = []( std::ostream& ){};
@@ -743,7 +752,7 @@ namespace cli
             assert( std::distance(first, last) == 1+sizeof...(Args) );
             
             using UnqualifiedP = typename std::decay<P>::type;
-            const P p = detail::FromString<UnqualifiedP>::get(out, parmDescs[i], *first);
+            P p = detail::FromString<UnqualifiedP>::get(out, parmDescs[i], *first);
 
             auto g = [&](auto ... pars){ f(p, pars...); };
             return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
@@ -911,6 +920,11 @@ namespace cli
             return ValidationResult::Match;
         }
 
+        void ResetAutoComplete() override
+        {
+            m_autoCompleteIndices = { 0 };
+        }
+
         template <typename T, size_t N>
         std::vector<std::string> GetAutoCompleteForParam(size_t param)
         {
@@ -1006,7 +1020,6 @@ namespace cli
 
     private:
         const F func;
-        //const std::string description;
         const std::vector<std::string> parameterDesc;
 
         std::array<size_t, sizeof...(Args)> m_autoCompleteIndices = { 0 };
@@ -1082,356 +1095,24 @@ namespace cli
 
 
     // ********************************************************************
-
-    // CliSession implementation
-
-    inline CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
-            cli(_cli),
-            coutPtr(Cli::CoutPtr()),
-            current(cli.RootMenu()),
-            globalScopeMenu(std::make_unique< Command >()),
-            out(_out),
-            history(historySize)
-        {
-            history.LoadCommands(cli.GetCommands());
-
-            coutPtr->Register(out);
-
-            globalScopeMenu->TransferRootCommands(*cli.RootMenu());
-
-            globalScopeMenu->Insert(
-                "help",
-                [this](std::ostream&){ Help(); },
-                "This help message"
-            );
-            globalScopeMenu->Insert(
-                "exit",
-                [this](std::ostream&) { Exit(); },
-                "Quit the session"
-            );
-#ifdef CLI_HISTORY_CMD
-            globalScopeMenu->Insert(
-                "history",
-                [this](std::ostream&){ ShowHistory(); },
-                "Show the history"
-            );
-#endif
-        }
-
-    inline void CliSession::Feed(const std::string& cmd)
-    {
-        std::vector<std::string> strs;
-        detail::split(strs, cmd);
-        if (strs.empty()) return; // just hit enter
-
-        history.NewCommand(cmd); // add anyway to history
-
-        try
-        {
-
-            // global cmds check
-            size_t executed = current->ScanCmds(strs, *this);
-
-            // root menu recursive cmds check
-            if (executed == 0)
-            {
-                executed = globalScopeMenu->ScanCmds(strs, *this);
-            }
-
-            if (executed == 0)
-            {
-                out << "Command '" << strs[0] << "' not found.\n";
-            }
-            else if (executed > 1)
-            {
-                // - 1 because the leaf command isn't a menu
-                for (size_t i = 0; i < executed - 1; ++i)
-                {
-                    Exit();
-                }
-            }
-        }
-        catch(const std::exception& e)
-        {
-            cli.StdExceptionHandler(out, cmd, e);
-        }
-        catch(...)
-        {
-            out << "Cli. Unknown exception caught handling command line \""
-                << cmd
-                << "\"\n";
-        }
-    }
-
-    inline const Command* CliSession::GetCurrentCommand(const std::string& line) const
-    {
-        std::vector<std::string> strs;
-        detail::split(strs, line);
-
-        if (strs.empty())
-        {
-            return nullptr;
-        }
-
-        if (auto* command = current->FindCommand(strs))
-        {
-            return command;
-        }
-
-        // root menu recursive cmds check
-        return globalScopeMenu->FindCommand(strs);
-    }
-
-    inline size_t CliSession::PromptImpl()
-    {
-        if (exit) return 0;
-
-        auto prompt = current->Prompt();
-        std::string suffix = "> ";
-        out << beforePrompt
-            << prompt
-            << afterPrompt
-            << suffix
-            << std::flush;
-
-        return prompt.size() + suffix.size();
-    }
-
-    inline void CliSession::Help() const
-    {
-        out << "Commands available:\n";
-        globalScopeMenu->MainHelp(out);
-        current -> MainHelp( out );
-    }
-
-    void CliSession::Exit()
-    {
-        if (current = current->GetParent())
-        {
-            return;
-        }
-
-        exitAction(out);
-        cli.ExitAction(out);
-
-        auto cmds = history.GetCommands();
-        cli.StoreCommands(cmds);
-
-        exit = true; // prevent the prompt to be shown
-    }
-
-    inline AutoCompleter::Completions CliSession::GetCompletions(std::string currentLine, const size_t param)
-    {
-        std::vector<std::string> params;
-        detail::split(params, currentLine);
-
-        auto commands = current->GetCommands(params, param);
-
-        size_t currentParam = 0;
-        std::for_each(commands.begin(), commands.end(),
-            [&currentParam](const auto& pair) { currentParam += pair.second; });
-
-        if (commands.empty())
-        {
-            auto completions = current->GetChildCommandCompletions("");
-            // Rotate completion logic
-            current->m_commandAutoCompleteIndex = (current->m_commandAutoCompleteIndex + 1) % completions.size();
-            completions.insert(completions.end(), completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
-            completions.erase(completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
-            return completions;
-        }
-
-        // It's not possible to do menu auto-complete within the menu command as it doesn't know about
-        // its peers.  If the second value - param count provided - is 0, then do this work.
-        if (commands.back().second == commands.back().first.get().GetParamCount())
-        {
-            // TODO: This won't work with filters
-            auto completions = commands.back().first.get().GetChildCommandCompletions(
-                currentParam >= params.size() ? "" : params[currentParam]);
-
-            // Rotate completion logic
-            current->m_commandAutoCompleteIndex = (current->m_commandAutoCompleteIndex + 1) % completions.size();
-            completions.insert(completions.end(), completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
-            completions.erase(completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
-            return completions;
-        }
-
-        bool valid = true;
-        size_t exitsRequired = 0;
-        size_t paramOffset = 0;
-        for (size_t i = 0; i < commands.size(); ++i)
-        {
-            Command& cmd = commands[i].first.get();
-
-            if (paramOffset + commands[i].second >= params.size())
-            {
-                break;
-            }
-
-            std::vector<std::string> localParams;
-            localParams.assign(params.begin() + paramOffset,
-                params.begin() + paramOffset + commands[i].second);
-            paramOffset += cmd.GetParamCount();
-
-            if (!cmd.Exec(localParams, *this))
-            {
-                valid = false;
-                break;
-            }
-
-            ++exitsRequired;
-        }
-
-        AutoCompleter::Completions results;
-        // TODO: This validity logic might be wrong
-        if (valid)
-        {
-            results = commands.back().first.get().GetParamCompletion(param >= params.size() ? "" : params[param],
-                (param - paramOffset));
-        }
-
-        for (size_t i = 0; i < exitsRequired; ++i)
-        {
-            Exit();
-        }
-
-        return results;
-    }
-
-    detail::AutoCompletion CliSession::GetCurrentCommandCompletion(const std::string& line) const
-    {
-        const auto* command = GetCurrentCommand(line);
-        if (!command)
-        {
-            return {};
-        }
-
-        return { command->Name(), command->Description() };
-    }
-
     // Menu implementation
     template <typename F, typename R, typename ... Args>
-    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, Args...) const )
+    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, Args...) const)
     {
         assert(parDesc.size() == 0 || parDesc.size() == sizeof...(Args));
         return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, help, parDesc));
     }
 
     template <typename F, typename R>
-    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, const std::vector<std::string>& args) const )
+    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, const std::vector<std::string>& args) const)
     {
         return Insert(std::make_unique<FreeformCommand<F>>(cmdName, f, help, parDesc));
     }
 
     template <typename F, typename R>
-    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R (F::*)(std::ostream& out, std::vector<std::string> args) const )
+    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, std::vector<std::string> args) const)
     {
         return Insert(std::make_unique<FreeformCommand<F>>(cmdName, f, help, parDesc));
-    }
-
-    CmdHandler Command::Insert(std::unique_ptr<Command>&& cmd)
-    {
-        std::shared_ptr<Command> scmd(std::move(cmd));
-        scmd->parent = this;
-        CmdHandler c(scmd, cmds);
-        cmds->push_back(scmd);
-        return c;
-    }
-
-    CmdHandler Command::Insert(std::string&& menuName)
-    {
-        std::shared_ptr<Command> smenu = std::make_shared<Command>(std::move(menuName));
-        CmdHandler c(smenu, cmds);
-        smenu->parent = this;
-        cmds->push_back(smenu);
-        return c;
-    }
-
-    bool Command::Exec(const std::vector<std::string>& cmdLine, CliSession& session)
-    {
-        if (!IsEnabled())
-            return false;
-        if (cmdLine[0] == Name())
-        {
-            // check also for subcommands
-            std::vector<std::string > subCmdLine(cmdLine.begin() + 1, cmdLine.end());
-            for (auto& cmd : *cmds)
-                if (cmd->Exec(subCmdLine, session)) return true;
-
-            if (HasChildren())
-            {
-                session.Current(this);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    size_t Command::ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session)
-    {
-        if (!IsEnabled())
-            return 0;
-
-        auto commands = GetCommands(cmdLine, 0);
-        size_t requiredParams = 0;
-        for (const auto& cmdPair : commands)
-        {
-            requiredParams += cmdPair.first.get().GetParamCount();
-        }
-
-        if (requiredParams < cmdLine.size())
-        {
-            return 0;
-        }
-
-        size_t executed = 0;
-        size_t paramOffset = 0;
-        for (size_t i = 0; i < commands.size(); ++i)
-        {
-            Command& cmd = commands[i].first.get();
-
-            std::vector<std::string> localParams;
-            localParams.assign(cmdLine.begin() + paramOffset, 
-                cmdLine.begin() + paramOffset + commands[i].second);
-
-            paramOffset += commands[i].second;
-
-            if (!cmd.Exec(localParams, session))
-            {
-                // We still executed _something_, it just failed
-                break;
-            }
-            ++executed;
-        }
-
-        return executed;
-    }
-
-    Command* Command::FindCommand(const std::vector<std::string>& cmdLine)
-    {
-        if (!IsEnabled())
-        {
-            return nullptr;
-        }
-
-        for (auto& cmd : *cmds)
-        {
-            auto validationResult = cmd->Validate(cmdLine);
-            if (validationResult == Command::ValidationResult::NoMatch)
-            {
-                continue;
-            }
-
-            // Command was found, though execution may fail
-            return cmd.get();
-        }
-
-        if (!parent)
-        {
-            return nullptr;
-        }
-        
-        return parent->FindCommand(cmdLine);
     }
 } // namespace cli
 

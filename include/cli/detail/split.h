@@ -233,6 +233,14 @@ inline void split(std::vector<std::string>& strs, const std::string& input)
     sentence.SplitInto(strs);
 }
 
+inline std::vector<std::string> split(const std::string& input)
+{
+    Text sentence(input);
+    std::vector<std::string> strs;
+    sentence.SplitInto(strs);
+    return strs;
+}
+
 } // namespace detail
 } // namespace cli
 

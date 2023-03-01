@@ -35,6 +35,8 @@
 #include "cli.h" // CliSession
 #include "detail/keyboard.h"
 
+class ConsoleTestRunner;
+
 namespace cli
 {
 
@@ -49,6 +51,7 @@ class Scheduler; // forward declaration
 class CliLocalTerminalSession : public CliSession
 {
 public:
+    friend class ::ConsoleTestRunner;
 
     /**
      * @brief Construct a new Cli Local Terminal Session object that uses the specified @c std::ostream

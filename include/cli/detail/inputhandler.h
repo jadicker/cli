@@ -45,6 +45,8 @@ namespace detail
 
 class InputHandler
 {
+    friend class ::ConsoleTestRunner;
+
 public:
     InputHandler(CliSession& _session, InputDevice& kb) :
         session(_session),
@@ -64,6 +66,19 @@ private:
     {
         const std::pair<Symbol,std::string> s = terminal.Keypressed(k);
         NewCommand(s);
+    }
+
+    void EnterText(const std::string& str)
+    {
+        for (auto c : str)
+        {
+            NewCommand(terminal.Keypressed({ KeyType::ascii, c }));
+        }
+    }
+
+    void AutoComplete()
+    {
+        //NewCommand({ Symbol::tab, '\t' });
     }
 
     void NewCommand(const std::pair<Symbol, std::string>& s)
@@ -98,70 +113,18 @@ private:
             }
             case Symbol::tab:
             {
-                //auto line = terminal.GetLine();
-                //size_t paramIndex = terminal.GetParamIndex(line);
                 auto lineInfo = terminal.GetAutoCompleteLine();
                 size_t paramIndex = lineInfo.second;
 
                 auto completions = session.GetCompletions(lineInfo.first, lineInfo.second);
 
-                if (completions.empty())
-                    break;
-
-                // This should perhaps be somehow generalized to "user typed input for this param" but
-                // for now turn on common prefix matching for top level command completion
-                /* if (paramIndex == 0)
+                if (completions.m_completions.empty())
                 {
-                    // TODO: Set up command completion/command as first class citizens
-                    if (completions.size() == 1)
-                    {
-                        terminal.SetLine(completions[0].text + ' ');
-                        break;
-                    }
-
-                    auto commonPrefix = CommonPrefix(GetTextCompletions(completions));
-                    if (commonPrefix.size() > lineInfo.first.size())
-                    {
-                        terminal.SetLine(commonPrefix);
-                        break;
-                    }
-                } */
-
-                auto cmdCompletion = session.GetCurrentCommandCompletion(lineInfo.first);
-
-                // We're completing a parameter for a command
-                /*
-                std::vector<AutoCompletion> autoCompletions;
-                std::for_each(completions.begin(), completions.end(), [&autoCompletions](auto& cmd)
-                    {
-                        autoCompletions.push_back(cmd);
-                    });
-                    */
-                terminal.SetCompletions(completions, cmdCompletion.description);
-
-                
-
-#ifdef OLD_AUTOCOMPLETE
-                if (completions.size() == 1)
-                {
-                    terminal.SetLine(completions[0]+' ');
                     break;
                 }
 
-                auto commonPrefix = CommonPrefix(completions);
-                if (commonPrefix.size() > line.size())
-                {
-                    terminal.SetLine(commonPrefix);
-                    break;
-                }
-                session.OutStream() << '\n';
-                std::string items;
-                std::for_each( completions.begin(), completions.end(), [&items](auto& cmd){ items += '\t' + cmd; } );
-                session.OutStream() << items << '\n';
-                session.Prompt();
-                terminal.ResetInputLine();
-                terminal.SetLine( line );
-#endif
+                terminal.SetCompletions(completions.m_completions,
+                    completions.m_command ? completions.m_command->Description() : "");
                 break;
             }
         }

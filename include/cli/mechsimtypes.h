@@ -11,6 +11,7 @@
 #include "MechSim/Game/Game.h"
 #include "MechSim/Misc/ObjectUtils.h"
 #include "MechSim/Misc/VectorHandle.h"
+#include "MechSim/Instrument/Instrument.h"
 
 namespace cli
 {
@@ -88,13 +89,6 @@ namespace cli
 
 		AutoCompleter(Completions&& completions)
 		{
-			/*
-			const auto& objects = MechSim::GetAllObjects<T>();
-			for (const auto* obj : objects)
-			{
-				m_completions.push_back(detail::from_string<T>(*m_objects[i]))
-			}
-			*/
 			m_completions = std::move(completions);
 			m_current = 0;
 		}
@@ -234,6 +228,8 @@ namespace cli
 	using ObjParam = FilteredObjParam<T, ObjFilters::None>;
 
 	using Powerable = FilteredObjParam<MechSim::Object, ObjFilters::Powerable>;
+
+	using Joystick = FilteredObjParam<MechSim::Joystick, ObjFilters::None>;
 	
 	class PartName
 	{
@@ -367,6 +363,34 @@ namespace cli
 		}
 	};
 
+	// Not sure of a better way to do this yet
+#define DEFINE_CLAMPED_FLOAT(name /* class name */, min /* float */, max /* float */) \
+	class name \
+	{ \
+	public: \
+		constexpr float GetMin() const { return (min); } \
+		constexpr float GetMax() const { return (max); } \
+		\
+		operator float() const { return m_val; } \
+		\
+		bool Create(std::ostream& out, const std::string& paramName, const std::string& str) \
+		{ \
+			float val = detail::FromString<float>::get(out, paramName, str); \
+			if (val < GetMin() || val > GetMax()) \
+			{ \
+				out << paramName << ": received invalid float " << str << "\n"; \
+				return false; \
+			} \
+			m_val = val; \
+			return true; \
+		} \
+	\
+	private: \
+		float m_val = 0.0f; \
+	};
+
+	DEFINE_CLAMPED_FLOAT(Axis, -1.0f, 1.0f);
+
 	template <typename T, typename Enable>
 	struct ParamAutoComplete;
 
@@ -457,6 +481,26 @@ namespace cli
 			}
 		};
 
+		// TODO: Clean this up to be one template, if possible
+#define DEFINE_BASIC_FROM_STRING(typeName) \
+		template <> \
+		struct FromString<typeName> \
+		{ \
+			static typeName get(std::ostream& out, const std::string& param, const std::string& s) \
+			{ \
+				typeName result; \
+				result.Create(out, param, s); \
+				return result; \
+			} \
+		}
+
+		DEFINE_BASIC_FROM_STRING(MechId);
+		DEFINE_BASIC_FROM_STRING(CircuitId);
+		DEFINE_BASIC_FROM_STRING(ReactorPlug);
+		DEFINE_BASIC_FROM_STRING(PartName);
+		DEFINE_BASIC_FROM_STRING(Joystick);
+		DEFINE_BASIC_FROM_STRING(Axis);
+#if 0
 		template <>
 		struct FromString<MechId>
 		{
@@ -500,5 +544,6 @@ namespace cli
 				return result;
 			}
 		};
+#endif
 	}
 }
