@@ -646,7 +646,7 @@ namespace cli
 
         struct CompletionResults
         {
-            const Command* m_command;
+            Command* m_command;
             size_t m_completionParamIndex;
             AutoCompleter::Completions m_completions;
         };

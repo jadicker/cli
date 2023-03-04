@@ -83,11 +83,11 @@ public:
 
     void ResetInputLine() { m_position = m_promptSize; }
 
-    void SetLine(const std::string &newLine)
+    void SetLine(const std::string& newLine)
     {
         *out << beforeInput
-             << std::string(GetInputPosition(), '\b') << newLine
-             << afterInput << std::flush;
+            << std::string(GetInputPosition(), '\b') << newLine
+            << afterInput << std::flush;
 
         // if newLine is shorter then currentLine, we have
         // to clear the rest of the string
@@ -127,12 +127,14 @@ public:
         const auto pos = static_cast<std::string::difference_type>(m_position - m_promptSize);
 
         *out << beforeInput
-             << std::string(m_currentLine.begin() + pos, m_currentLine.end())
-             << afterInput << std::flush;
+            << std::string(m_currentLine.begin() + pos, m_currentLine.end())
+            << afterInput << std::flush;
         m_position = m_promptSize + m_currentLine.size();
     }
 
-    void SetCompletions(const std::vector<AutoCompletion>& completions, const std::string& cmdDesc);
+    void SetCompletions(size_t param, const std::vector<AutoCompletion>& completions, const std::string& cmdDesc);
+
+    size_t GetTerminalWidth() const { return m_terminalWidth; }
 
     void InsertText(std::string str)
     {
@@ -442,27 +444,8 @@ public:
             return { "", 0 };
         }
 
-        size_t cursor = GetInputPosition();
-        if (cursor >= m_currentLine.size() && std::isspace(m_currentLine.back()) ||
-            std::isspace(m_currentLine[cursor]))
-        {
-            std::string newLine = m_currentLine.substr(0, cursor);
-            std::vector<std::string> params;
-            detail::split(params, newLine);
-            return { newLine, params.size() };
-        }
-
-        auto lineToCursor = m_currentLine.substr(0, GetInputPosition());
-        std::vector<std::string> params;
-        detail::split(params, lineToCursor);
-        if (params.empty())
-        {
-            return { lineToCursor, 0 };
-        }
-
-        const bool onNewParam = std::isspace(m_currentLine[cursor]);// || (cursor + m_promptSize) == m_autoCompleteStart;
-        const size_t currentParam = onNewParam ? params.size() : params.size() - 1;
-        return { lineToCursor, currentParam };
+        auto paramInfo = GetParamInfo(m_currentLine, GetInputPosition());
+        return { m_currentLine.substr(0, GetInputPosition()), paramInfo.index };
     }
 
     struct ParamInfo
@@ -869,7 +852,7 @@ public:
     ParamList(const Params& params) : m_params(params) {}
 
     // Returns lines printed
-    size_t Print(Terminal& t, size_t paramStartPos, size_t style)
+    size_t Print(Terminal& t, size_t paramStartPos, size_t index, size_t style)
     {
         if (m_params.empty())
         {
@@ -913,6 +896,10 @@ public:
         }
         else if (style == 1)
         {
+            size_t clampedIndex = index % m_params.size();
+            m_params.insert(m_params.end(), m_params.begin(), m_params.begin() + clampedIndex);
+            m_params.erase(m_params.begin(), m_params.begin() + clampedIndex);
+
             // prompt> cmd parm
             //  [.. b c d] ^ <desc text>
             // ^          ^ > subtract these from the width
@@ -991,6 +978,46 @@ public:
             t.InsertText(m_params[0].description);
             return 1;
         }
+        else if (style == 2)
+        {
+#if 0
+            size_t remainingSize = t.GetTerminalWidth(); // Subtract '[' and ']'
+            
+            std::string completionSuffix;
+            for (size_t i = 1; i < m_params.size(); ++i)
+            {
+                completionSuffix += m_params[i].text;
+                if (i != m_params.size() - 1)
+                {
+                    completionSuffix += "  ";
+                }
+            }
+
+            // ^ [a b c d] going forward
+            //size_t width = (t.m_terminalWidth - paramStartPos) + 2;
+
+            t.AddLine(std::string(paramStartPos, ' '));
+            t.InsertText("^ [");
+
+            *t.out << rang::fg::blue;
+
+            std::string completionSuffix;
+            for (size_t i = 1; i < m_params.size(); ++i)
+            {
+                completionSuffix += m_params[i].text;
+                if (i != m_params.size() - 1)
+                {
+                    completionSuffix += "  ";
+                }
+            }
+
+            t.InsertText(completionSuffix);
+
+            *t.out << rang::style::reset;
+
+            t.InsertText("]");
+#endif
+        }
 
         return 0;
     }
@@ -999,7 +1026,7 @@ private:
     Params m_params;
 };
 
-inline void Terminal::SetCompletions(const std::vector<AutoCompletion>& completions, const std::string& cmdDesc)
+inline void Terminal::SetCompletions(size_t param, const std::vector<AutoCompletion>& completions, const std::string& cmdDesc)
 {
     assert(!completions.empty());
 
@@ -1038,7 +1065,7 @@ inline void Terminal::SetCompletions(const std::vector<AutoCompletion>& completi
     *out << rang::style::reset;
 
     ParamList paramList(completions);
-    size_t linesPrinted = paramList.Print(*this, m_autoCompleteStart, 1);
+    size_t linesPrinted = paramList.Print(*this, m_autoCompleteStart, paramInfo.index, 1);
 
     // Add description line
     AddLine(std::string(m_autoCompleteStart, ' '));

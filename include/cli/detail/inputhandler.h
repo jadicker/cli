@@ -117,13 +117,12 @@ private:
                 size_t paramIndex = lineInfo.second;
 
                 auto completions = session.GetCompletions(lineInfo.first, lineInfo.second);
-
                 if (completions.m_completions.empty())
                 {
                     break;
                 }
 
-                terminal.SetCompletions(completions.m_completions,
+                terminal.SetCompletions(completions.m_completionParamIndex, completions.m_completions,
                     completions.m_command ? completions.m_command->Description() : "");
                 break;
             }

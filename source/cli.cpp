@@ -226,10 +226,6 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
             return {};
         }
 
-        // Rotate completion logic
-        current->m_commandAutoCompleteIndex = (current->m_commandAutoCompleteIndex + 1) % completions.size();
-        completions.insert(completions.end(), completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
-        completions.erase(completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
         return { nullptr, param, completions };
     }
 
@@ -247,9 +243,6 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
         }
 
         // Rotate completion logic
-        current->m_commandAutoCompleteIndex = (current->m_commandAutoCompleteIndex + 1) % completions.size();
-        completions.insert(completions.end(), completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
-        completions.erase(completions.begin(), completions.begin() + current->m_commandAutoCompleteIndex);
         return { &commands.back().m_command.get(), param, completions };
     }
 
