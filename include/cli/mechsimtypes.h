@@ -3,6 +3,7 @@
 #include "colorprofile.h"
 #include "detail/autocomplete.h"
 
+#include <cli/detail/fromstring.h>
 #include <limits>
 #include <type_traits>
 
@@ -23,13 +24,13 @@ namespace cli
 
 	inline std::ostream& operator<<(std::ostream& os, const MechSim::Object& object)
 	{
-		os << Style::Object() << object.GetName() << " (" << object.GetId() << ") " << reset;
+		os << Style::Object() << object.GetClass() << reset << " " << object.GetId() << reset;
 		return os;
 	}
 
 	inline std::ostream& operator<<(std::ostream& os, const MechSim::Mech& mech)
 	{
-		os << Style::Mech() << mech.GetName() << " (" << mech.GetId() << ") " << reset;
+		os << Style::Mech() << mech.GetName() << reset << " " << mech.GetId() << reset;
 		return os;
 	}
 
@@ -160,7 +161,8 @@ namespace cli
 			{
 				return [](const MechSim::Object* obj)
 				{
-					return !!dynamic_cast<const MechSim::Powerable*>(obj);
+					const auto* powerable = dynamic_cast<const MechSim::Powerable*>(obj);
+					return static_cast<bool>(powerable);
 				};
 			}
 		};
@@ -196,7 +198,19 @@ namespace cli
 		bool Create(std::ostream& out, const std::string& paramName, const std::string& objectIdStr)
 		{
 			m_object = cli::GetObj<T>(out, paramName, objectIdStr);
-			return static_cast<bool>(m_object);
+			if (!static_cast<bool>(m_object))
+			{
+				m_object = nullptr;
+				return false;
+			}
+
+			if (!filter::Get()(m_object))
+			{
+				m_object = nullptr;
+				return false;
+			}
+
+			return true;
 		}
 
 		// Only call from safe contexts!
@@ -216,11 +230,11 @@ namespace cli
 	{
 		if (!objParam.GetObj())
 		{
-			os << Style::Object() << " (" << objParam.GetId() << ")" << reset;
+			os << Style::Object() << reset << " (" << objParam.GetId() << ")" << reset;
 			return os;
 		}
 
-		os << Style::Object() << objParam.GetObj()->GetName() << " (" << objParam.GetId() << ")" << reset;
+		os << Style::Object() << objParam.GetObj()->GetName() << reset << " (" << objParam.GetId() << ")" << reset;
 		return os;
 	}
 
@@ -261,7 +275,7 @@ namespace cli
 	public:
 		Id() = default;
 
-		explicit operator bool() const { return m_id != std::numeric_limits<size_t>::max(); }
+		explicit operator bool() const { return Validate(m_id); }
 		operator size_t() const { return m_id; }
 
 		bool Create(std::ostream& out, const std::string& paramName, const std::string& idStr)
@@ -286,8 +300,6 @@ namespace cli
 	class MechId : public Id
 	{
 	public:
-		explicit operator bool() const { return m_id == 0; }
-
 		static AutoCompleter::Completions GetCompletions()
 		{
 			AutoCompleter::Completions results;
@@ -301,7 +313,8 @@ namespace cli
 	protected:
 		bool Validate(size_t id) const override
 		{
-			return id == 0;
+			// TODO: Validate against actual mechs
+			return true;
 		}
 	};
 
@@ -350,7 +363,7 @@ namespace cli
 			for (size_t i = 0; i < plugs.size(); ++i)
 			{
 				std::stringstream str;
-				str << i << " (" << plugs[i].m_voltage << ")";
+				str << "Plug " << i << " (" << plugs[i].m_voltage << "V)";
 				results.push_back({ std::to_string(i), str.str() });
 			}
 			return results;
@@ -360,6 +373,28 @@ namespace cli
 		bool Validate(size_t id) const override
 		{
 			return id < MechSim::GetMech().GetReactor()->ConnectionCount;
+		}
+	};
+
+	class ValidReactorPlug : public ReactorPlug
+	{
+	public:
+		static AutoCompleter::Completions GetCompletions()
+		{
+			AutoCompleter::Completions results;
+			const auto& plugs = MechSim::GetMech().GetReactor()->GetPlugs();
+			for (size_t i = 0; i < plugs.size(); ++i)
+			{
+				if (!plugs[i].m_handle.IsValid())
+				{
+					continue;
+				}
+
+				std::stringstream str;
+				str << "Plug " << i << " (" << plugs[i].m_voltage << "V)";
+				results.push_back({ std::to_string(i), str.str() });
+			}
+			return results;
 		}
 	};
 
@@ -476,7 +511,10 @@ namespace cli
 			static FilteredObjParam<T, Filter> get(std::ostream& out, const std::string& paramName, const std::string& s)
 			{
 				FilteredObjParam<T, Filter> result;
-				result.Create(out, paramName, s);
+				if (!result.Create(out, paramName, s))
+				{
+					throw bad_conversion();
+				}
 				return result;
 			}
 		};
@@ -489,7 +527,8 @@ namespace cli
 			static typeName get(std::ostream& out, const std::string& param, const std::string& s) \
 			{ \
 				typeName result; \
-				result.Create(out, param, s); \
+				if (!result.Create(out, param, s)) \
+				{ throw bad_conversion(); } \
 				return result; \
 			} \
 		}
@@ -497,9 +536,11 @@ namespace cli
 		DEFINE_BASIC_FROM_STRING(MechId);
 		DEFINE_BASIC_FROM_STRING(CircuitId);
 		DEFINE_BASIC_FROM_STRING(ReactorPlug);
+		DEFINE_BASIC_FROM_STRING(ValidReactorPlug);
 		DEFINE_BASIC_FROM_STRING(PartName);
 		DEFINE_BASIC_FROM_STRING(Joystick);
 		DEFINE_BASIC_FROM_STRING(Axis);
+
 #if 0
 		template <>
 		struct FromString<MechId>

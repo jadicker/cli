@@ -32,6 +32,12 @@
 
 #include "detail/rang.h"
 
+#include <assert.h>
+#include <optional>
+#include <string>
+#include <vector>
+#include <unordered_map>
+
 namespace cli
 {
 
@@ -60,6 +66,14 @@ struct StyleHelper
     detail::rang::style style = detail::rang::style::reset;
 };
 
+struct ColorHelper
+{
+    int m_r = 255;
+    int m_g = 255;
+    int m_b = 255;
+    bool m_underline = false;
+};
+
 namespace Style
 {
     using FGColor = StyleHelper<detail::rang::fg>;  
@@ -71,12 +85,38 @@ namespace Style
     inline FGColor Mech() { return FGColor(detail::rang::fg::yellow); }
 
     inline FGColor Green() { return FGColor(detail::rang::fg::green); }
+    inline FGColor Yellow() { return FGColor(detail::rang::fg::yellow); }
     inline FGColor Red() { return FGColor(detail::rang::fg::red); }
+
+    inline std::string Reset() { return "\033[0m"; }
+
+    extern std::string Color(unsigned char red, unsigned char green, unsigned char blue);
+
+    inline std::string Color(const ColorHelper& helper)
+    {
+        return Color(helper.m_r, helper.m_g, helper.m_b);
+    }
+
+    extern std::string BGColor(unsigned char red, unsigned char green, unsigned char blue);
+}
+
+inline std::ostream& operator<<(std::ostream& os, ColorHelper color)
+{
+    if (color.m_underline)
+    {
+        os << "\033[4m";
+    }
+
+    os << Style::Color(color.m_r, color.m_b, color.m_g);
+    return os;
 }
 
 inline std::ostream& operator<<(std::ostream& os, BeforePrompt)
 {
-    if ( Color() ) { os << detail::rang::control::forceColor << detail::rang::fg::green << detail::rang::style::bold; }
+    if (Color())
+    {
+        os << ColorHelper{52, 144, 111, true};
+    }
     return os;
 }
 
@@ -122,6 +162,131 @@ inline std::ostream& operator<<(std::ostream& os, Reset)
     os << detail::rang::style::reset;
     return os;
 }
+
+inline size_t GetCharLen(const char c)
+{
+    int cplen = 1;
+    if ((c & 0xf8) == 0xf0)
+    {
+        return 4;
+    }
+    else if ((c & 0xf0) == 0xe0)
+    {
+        return 3;
+    }
+    else if ((c & 0xe0) == 0xc0)
+    {
+        return 2;
+    }
+
+    return 1;
+}
+
+// Returns amount of real chars to skip based on utf8 characters
+inline size_t GetLength(std::string_view str, size_t chars)
+{
+    size_t outChars = 0;
+    for (size_t i = 0; i < str.size();)
+    {
+        if (chars == 0)
+        {
+            return outChars;
+        }
+
+        size_t len = GetCharLen(str[i]);
+        outChars += len;
+
+        i += len;
+        chars--;
+    }
+    return outChars;
+}
+
+// lines format is one line, then a line of chars that map to the color table to format them
+using ColorTable = std::unordered_map<char, ColorHelper>;
+extern std::string FormatColor(const ColorTable& colorTable, const std::vector<std::string>& lines);
+extern std::string FormatColor(const ColorTable& colorTable,
+                                const std::vector<std::string>& textLines,
+                                const std::vector<std::string>& colorLines);
+
+#if 0
+{
+    // There should be an even number of lines
+    assert(lines.size() % 2 == 0);
+
+    struct ColorRun
+    {
+        size_t startIndex;
+        size_t length;
+        std::optional<ColorHelper> color;
+    };
+
+    auto GetColorRun = [](const ColorTable& colorTable, const std::string& color, size_t startIndex) -> ColorRun
+    {
+        assert(startIndex < color.size());
+
+        ColorRun colorRun{ startIndex, 0 };
+        char c = color[startIndex];
+        auto colorIter = colorTable.find(c);
+        if (colorIter != colorTable.end())
+        {
+            colorRun.color = colorIter->second;
+        }
+        
+        size_t i;
+        for (i = startIndex + 1; i < color.size(); ++i)
+        {
+            if (color[i] != c)
+            {
+                break;
+            }
+        }
+
+        colorRun.length = i - startIndex;
+        return colorRun;
+    };
+
+    auto GetNextChars = [](const std::string& str, size_t start, size_t chars) -> std::string_view
+    {
+        return std::string_view(str.data() + start, chars);
+    };
+
+    // TODO: Could optimize a reservation here
+    std::string out;
+    // Tracks utf8 index
+    size_t textIndex;
+    for (size_t row = 0; row < lines.size(); row += 2)
+    {
+        textIndex = 0;
+        const std::string& textLine = lines[row];
+        const std::string& colorLine = lines[row + 1];
+
+        // Color line is required to be ANSI
+        for (size_t c = 0; c < colorLine.size();)
+        {
+            auto colorRun = GetColorRun(colorTable, colorLine, c);
+
+            out += colorRun.color ? Style::Color(*colorRun.color) : Style::Reset();
+
+            size_t utf8Length =
+                    GetLength(std::string_view(textLine.data() + textIndex, textLine.size() - textIndex),
+                              colorRun.length);
+
+            std::string_view text = GetNextChars(textLine, textIndex, utf8Length);
+            
+            textIndex += text.length();
+
+            out += text;
+            c += colorRun.length;
+        }
+
+        out += Style::Reset();
+        out += '\n';
+    }
+
+    return out;
+}
+#endif
 
 } // namespace cli
 

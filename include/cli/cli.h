@@ -78,6 +78,7 @@ namespace cli
     NAME_BASIC_TYPE(MechId);
     NAME_BASIC_TYPE(CircuitId);
     NAME_BASIC_TYPE(ReactorPlug);
+    NAME_BASIC_TYPE(ValidReactorPlug);
     NAME_BASIC_TYPE(PartName);
     NAME_BASIC_TYPE(Joystick);
     NAME_BASIC_TYPE(Axis);
@@ -339,7 +340,14 @@ namespace cli
             }
         }
 
-        using ScanResult = std::pair<std::vector<const Command*>, bool /* executed */>;
+        enum class ScanResultAction
+        {
+            NoneFound,
+            Executed,
+            BadParams
+        };
+
+        using ScanResult = std::pair<std::vector<const Command*>, ScanResultAction>;
         ScanResult ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session);
 
         std::string Prompt() const
@@ -596,7 +604,9 @@ namespace cli
         CliSession(CliSession&&) = delete;
         CliSession& operator = (CliSession&&) = delete;
 
-        bool Feed(const std::string& cmd, bool silent = false);
+        bool Feed(const std::string& cmd, bool silent = false, bool printCmd = false);
+
+        void RunProgram(const std::string& name, const std::vector<std::string>& program, bool silent = false);
 
         void Prompt()
         {
@@ -753,7 +763,7 @@ namespace cli
             
             using UnqualifiedP = typename std::decay<P>::type;
             P p = detail::FromString<UnqualifiedP>::get(out, parmDescs[i], *first);
-
+            
             auto g = [&](auto ... pars){ f(p, pars...); };
             return Select<Args...>::Exec(out, g, std::next(first), last, parmDescs, i + 1);
         }

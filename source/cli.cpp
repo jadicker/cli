@@ -57,8 +57,13 @@ CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
 #endif
 }
 
-bool CliSession::Feed(const std::string& cmd, bool silent)
+bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
 {
+    if (printCmd)
+    {
+        out << cmd << "\n";
+    }
+
     std::vector<std::string> strs;
     detail::split(strs, cmd);
     if (strs.empty()) return false; // just hit enter
@@ -70,21 +75,20 @@ bool CliSession::Feed(const std::string& cmd, bool silent)
 
     try
     {
-        // global cmds check
         auto result = current->ScanCmds(strs, *this);
 
-        if (!result.second)
+        if (result.second == Command::ScanResultAction::NoneFound)
         {
             result = currentGlobalScopeMenu->ScanCmds(strs, *this);
         }
 
         // root menu recursive cmds check
-        if (!result.second)
+        if (result.second == Command::ScanResultAction::NoneFound)
         {
             result = globalScopeMenu->ScanCmds(strs, *this);
         }
 
-        if (!result.second)
+        if (result.second != Command::ScanResultAction::Executed)
         {
             if (!silent)
             {
@@ -116,7 +120,7 @@ bool CliSession::Feed(const std::string& cmd, bool silent)
             }
         }
 
-        return result.second;
+        return result.second == Command::ScanResultAction::Executed;
     }
     catch (const std::exception& e)
     {
@@ -133,6 +137,17 @@ bool CliSession::Feed(const std::string& cmd, bool silent)
     }
 
     return false;
+}
+
+void CliSession::RunProgram(const std::string& name, const std::vector<std::string>& program, bool silent)
+{
+    out << "Executing program " << name << "...\n";
+
+    for (const auto& line : program)
+    {
+        Prompt();
+        Feed(line, silent, true);
+    }
 }
 
 const Command* CliSession::GetCurrentCommand(const std::string& line) const
@@ -343,7 +358,7 @@ Command::ScanResult Command::ScanCmds(const std::vector<std::string>& cmdLine, C
         {
             results.first.push_back(&command.m_command.get());
         }
-        results.second = false;
+        results.second = ScanResultAction::BadParams;
         return results;
     }
 
@@ -360,7 +375,7 @@ Command::ScanResult Command::ScanCmds(const std::vector<std::string>& cmdLine, C
         paramOffset += commands[i].m_paramsFound;
 
         results.first.push_back(&cmd);
-        results.second = true;
+        results.second = ScanResultAction::Executed;
         if (!cmd.Exec(localParams, session))
         {
             // We still executed _something_, it just failed

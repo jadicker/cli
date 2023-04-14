@@ -193,17 +193,12 @@ public:
                     break;
                 }
                 
-                --m_position;
-
                 if (GetInputPosition() == 0)
                 {
                     break;
                 }
 
-                if (m_position == m_promptSize)
-                {
-                    break;
-                }
+                --m_position;
 
                 const auto pos = static_cast<std::string::difference_type>(GetInputPosition());
                 // remove the char from buffer
@@ -251,15 +246,16 @@ public:
                     lastValidPosition = m_currentLine.size() - 1;
                 }
 
-                if (!m_currentLine.empty() && !std::isspace(m_currentLine[lastValidPosition]))
-                {
-                    TryFinishAutoComplete();
-                }
+                auto cmd = m_currentLine;
+
+                TryFinishAutoComplete();
 
                 *out << "\r\n";
-                auto cmd = m_currentLine;
+                
                 m_currentLine.clear();
-                m_position = m_currentLine.size();
+
+                // TODO: Not actually accurate until prompt is issued again.  In practice this is ok?
+                m_position = m_promptSize;
 
                 return std::make_pair(Symbol::command, cmd);
             }
@@ -354,11 +350,10 @@ public:
 
     void SetLineStart(size_t start)
     {
+        auto difference = static_cast<int>(m_promptSize) - static_cast<int>(start);
+        m_position -= difference;
+
         m_promptSize = start;
-        if (m_position < m_promptSize)
-        {
-            m_position = m_promptSize;
-        }
     }
 
     size_t GetLineCount() const
@@ -896,9 +891,9 @@ public:
         }
         else if (style == 1)
         {
-            size_t clampedIndex = index % m_params.size();
-            m_params.insert(m_params.end(), m_params.begin(), m_params.begin() + clampedIndex);
-            m_params.erase(m_params.begin(), m_params.begin() + clampedIndex);
+            //size_t clampedIndex = index % m_params.size();
+            //m_params.insert(m_params.end(), m_params.begin(), m_params.begin() + clampedIndex);
+            //m_params.erase(m_params.begin(), m_params.begin() + clampedIndex);
 
             // prompt> cmd parm
             //  [.. b c d] ^ <desc text>
