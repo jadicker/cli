@@ -9,6 +9,7 @@
 
 #include "MechSim/Central/Central.h"
 #include "MechSim/Central/Mech.h"
+#include "MechSim/Central/Modules.h"
 #include "MechSim/Game/Game.h"
 #include "MechSim/Misc/ObjectUtils.h"
 #include "MechSim/Misc/VectorHandle.h"
@@ -318,6 +319,49 @@ namespace cli
 		}
 	};
 
+	class ModuleId : public Id
+	{
+	public:
+		static AutoCompleter::Completions GetCompletions()
+		{
+			AutoCompleter::Completions results;
+			auto modules = MechSim::GetMech().GetModules();
+			for (const auto* module : modules)
+			{
+				results.push_back({ module->GetId().ToString(), module->GetDescription() });
+			}
+			return results;
+		}
+
+	protected:
+		bool Validate(size_t id) const override
+		{
+			return id < MechSim::GetMech().GetModuleCount();
+		}
+	};
+
+	class ModuleSlotId : public Id
+	{
+	public:
+		static AutoCompleter::Completions GetCompletions()
+		{
+			AutoCompleter::Completions results;
+			const auto& slots = MechSim::Game::GetInstance().m_activeModule->DescribeSlots();
+			size_t id = 0;
+			for (const std::string& slot : slots)
+			{
+				results.push_back({ std::to_string(id++), slot });
+			}
+			return results;
+		}
+
+	protected:
+		bool Validate(size_t id) const override
+		{
+			return id < MechSim::Game::GetInstance().m_activeModule->GetSlotCount();
+		}
+	};
+
 	class CircuitId : public Id
 	{
 	public:
@@ -519,8 +563,16 @@ namespace cli
 			}
 		};
 
-		// TODO: Clean this up to be one template, if possible
+	}
+
+	// TODO: Also a dep in cli.h right now, should be in another header
+	template <typename T> struct TypeDesc { static const char* Name() { return ""; } };
+
+#define NAME_BASIC_TYPE(typeName) template <> struct TypeDesc<##typeName##> { static const char* Name() { return #typeName; } };
+
+	// TODO: Clean this up to be one template, if possible
 #define DEFINE_BASIC_FROM_STRING(typeName) \
+	namespace detail { \
 		template <> \
 		struct FromString<typeName> \
 		{ \
@@ -531,60 +583,25 @@ namespace cli
 				{ throw bad_conversion(); } \
 				return result; \
 			} \
-		}
+		};\
+	} \
+	\
+	NAME_BASIC_TYPE(typeName);
+	
+	// Uses default Create path for FromString
+	DEFINE_BASIC_FROM_STRING(MechId);
+	DEFINE_BASIC_FROM_STRING(ModuleId);
+	DEFINE_BASIC_FROM_STRING(ModuleSlotId);
+	DEFINE_BASIC_FROM_STRING(CircuitId);
+	DEFINE_BASIC_FROM_STRING(ReactorPlug);
+	DEFINE_BASIC_FROM_STRING(ValidReactorPlug);
+	DEFINE_BASIC_FROM_STRING(PartName);
+	DEFINE_BASIC_FROM_STRING(Joystick);
+	DEFINE_BASIC_FROM_STRING(Axis);
 
-		DEFINE_BASIC_FROM_STRING(MechId);
-		DEFINE_BASIC_FROM_STRING(CircuitId);
-		DEFINE_BASIC_FROM_STRING(ReactorPlug);
-		DEFINE_BASIC_FROM_STRING(ValidReactorPlug);
-		DEFINE_BASIC_FROM_STRING(PartName);
-		DEFINE_BASIC_FROM_STRING(Joystick);
-		DEFINE_BASIC_FROM_STRING(Axis);
+	// Specially defined
+	NAME_BASIC_TYPE(Powerable);
 
-#if 0
-		template <>
-		struct FromString<MechId>
-		{
-			static MechId get(std::ostream& out, const std::string& param, const std::string& s)
-			{
-				MechId result;
-				result.Create(out, param, s);
-				return result;
-			}
-		};
-
-		template <>
-		struct FromString<CircuitId>
-		{
-			static CircuitId get(std::ostream& out, const std::string& param, const std::string& s)
-			{
-				CircuitId result;
-				result.Create(out, param, s);
-				return result;
-			}
-		};
-
-		template <>
-		struct FromString<ReactorPlug>
-		{
-			static ReactorPlug get(std::ostream& out, const std::string& param, const std::string& s)
-			{
-				ReactorPlug result;
-				result.Create(out, param, s);
-				return result;
-			}
-		};
-
-		template <>
-		struct FromString<PartName>
-		{
-			static PartName get(std::ostream& out, const std::string& param, const std::string& s)
-			{
-				PartName result;
-				result.Create(out, param, s);
-				return result;
-			}
-		};
-#endif
-	}
+#undef DEFINE_BASIC_FROM_STRING
+#undef NAME_BASIC_TYPE
 }

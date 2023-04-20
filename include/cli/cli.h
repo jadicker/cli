@@ -54,7 +54,7 @@ namespace cli
 {
     // ********************************************************************
 
-    template < typename T > struct TypeDesc { static const char* Name() { return ""; } };
+    //template < typename T > struct TypeDesc { static const char* Name() { return ""; } };
     template <> struct TypeDesc< char > { static const char* Name() { return "<char>"; } };
     template <> struct TypeDesc< unsigned char > { static const char* Name() { return "<unsigned char>"; } };
     template <> struct TypeDesc< signed char > { static const char* Name() { return "<signed char>"; } };
@@ -73,17 +73,6 @@ namespace cli
     template <> struct TypeDesc< std::string > { static const char* Name() { return "<string>"; } };
     template <> struct TypeDesc< std::vector<std::string> > { static const char* Name() { return "<list of strings>"; } };
     
-#define NAME_BASIC_TYPE(typeName) template <> struct TypeDesc<##typeName##> { static const char* Name() { return #typeName; } };
-    NAME_BASIC_TYPE(Powerable);
-    NAME_BASIC_TYPE(MechId);
-    NAME_BASIC_TYPE(CircuitId);
-    NAME_BASIC_TYPE(ReactorPlug);
-    NAME_BASIC_TYPE(ValidReactorPlug);
-    NAME_BASIC_TYPE(PartName);
-    NAME_BASIC_TYPE(Joystick);
-    NAME_BASIC_TYPE(Axis);
-#undef NAME_BASIC_TYPE
-
     template <> struct TypeDesc<FilteredObjParam<MechSim::Part, ObjFilters::MountableByController>> { static const char* Name() { return "Controllable"; } };
 
     template <typename T, typename Fn>
