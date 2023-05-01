@@ -29,6 +29,12 @@ namespace cli
 		return os;
 	}
 
+	inline std::ostream& operator<<(std::ostream& os, MechSim::ObjectHandle object)
+	{
+		os << *object.Get<MechSim::Object>();
+		return os;
+	}
+
 	inline std::ostream& operator<<(std::ostream& os, const MechSim::Mech& mech)
 	{
 		os << Style::Mech() << mech.GetName() << reset << " " << mech.GetId() << reset;
@@ -217,7 +223,7 @@ namespace cli
 		// Only call from safe contexts!
 		T& Get() { return *m_object; }
 
-		MechSim::ObjectId GetId() const { return m_object ? m_object->GetId() : MechSim::NullId; }
+		MechSim::ObjectId GetId() const { return m_object ? m_object->GetId() : MechSim::NullObjectId; }
 
 		MechSim::Object* GetObj() { return dynamic_cast<MechSim::Object*>(m_object); }
 		const MechSim::Object* GetObj() const { return dynamic_cast<MechSim::Object*>(m_object); }
@@ -304,18 +310,29 @@ namespace cli
 		static AutoCompleter::Completions GetCompletions()
 		{
 			AutoCompleter::Completions results;
-			for (const auto& mech : MechSim::Game::GetInstance().m_shop.GetMechs())
+			const auto& allRootObjectIds = MechSim::ObjectRegistry::GetInstance().GetAllRootObjects();
+			for (const auto& mechId : allRootObjectIds)
 			{
-				results.push_back({ mech->GetId().ToString(), "Mech desc here (I don't think they exist yet)" });
+				results.push_back({ std::to_string(mechId), "Mech description here..." });
 			}
 			return results;
+		}
+
+		MechSim::Mech* GetMech() const
+		{
+			return MechSim::FindObject<MechSim::Mech>(m_id);
 		}
 
 	protected:
 		bool Validate(size_t id) const override
 		{
-			// TODO: Validate against actual mechs
-			return true;
+			AutoCompleter::Completions results;
+			const auto& allRootObjectIds = MechSim::ObjectRegistry::GetInstance().GetAllRootObjects();
+			MechSim::ObjectId objId = MechSim::MakeObjectId(static_cast<MechSim::ObjectIdElementType>(id));
+			auto iter = std::find_if(allRootObjectIds.begin(), allRootObjectIds.end(),
+				[objId](const auto& mechId) { return mechId == objId; });
+
+			return iter != allRootObjectIds.end();
 		}
 	};
 
@@ -397,7 +414,7 @@ namespace cli
 		}
 	};
 
-	class ReactorPlug : public Id
+	class ReactorLine : public Id
 	{
 	public:
 		static AutoCompleter::Completions GetCompletions()
@@ -420,7 +437,7 @@ namespace cli
 		}
 	};
 
-	class ValidReactorPlug : public ReactorPlug
+	class ValidReactorLine : public ReactorLine
 	{
 	public:
 		static AutoCompleter::Completions GetCompletions()
@@ -429,7 +446,7 @@ namespace cli
 			const auto& plugs = MechSim::GetMech().GetReactor()->GetPlugs();
 			for (size_t i = 0; i < plugs.size(); ++i)
 			{
-				if (!plugs[i].m_handle.IsValid())
+				if (!plugs[i].m_handle)
 				{
 					continue;
 				}
@@ -593,8 +610,8 @@ namespace cli
 	DEFINE_BASIC_FROM_STRING(ModuleId);
 	DEFINE_BASIC_FROM_STRING(ModuleSlotId);
 	DEFINE_BASIC_FROM_STRING(CircuitId);
-	DEFINE_BASIC_FROM_STRING(ReactorPlug);
-	DEFINE_BASIC_FROM_STRING(ValidReactorPlug);
+	DEFINE_BASIC_FROM_STRING(ReactorLine);
+	DEFINE_BASIC_FROM_STRING(ValidReactorLine);
 	DEFINE_BASIC_FROM_STRING(PartName);
 	DEFINE_BASIC_FROM_STRING(Joystick);
 	DEFINE_BASIC_FROM_STRING(Axis);
