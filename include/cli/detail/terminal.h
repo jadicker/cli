@@ -457,7 +457,7 @@ public:
     {
         if (line.empty())
         {
-            return {};
+            return {0, 0, 0};
         }
 
         if (pos < line.size() && std::isspace(line[pos]))
@@ -653,7 +653,7 @@ private:
         return std::pair<size_t, size_t>{ start, end - start };
     }
 
-    // Returns start index and size of the token
+    // Returns start index and size of the token TODO: Return string_view
     std::optional<std::pair<size_t, size_t>> GetToken(size_t position)
     {
         return GetToken(m_currentLine, position);

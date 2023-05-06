@@ -79,7 +79,8 @@ bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
 
         if (result.second == Command::ScanResultAction::NoneFound)
         {
-            result = currentGlobalScopeMenu->ScanCmds(strs, *this);
+            result = cli.rootMenu->ScanCmds(strs, *this);
+            //result = currentGlobalScopeMenu->ScanCmds(strs, *this);
         }
 
         // root menu recursive cmds check
@@ -173,15 +174,6 @@ const Command* CliSession::GetCurrentCommand(const std::string& line) const
     }
 
     return nullptr;
-    /*
-    if (auto* command = current->FindCommand(strs))
-    {
-        return command;
-    }
-
-    // root menu recursive cmds check
-    return globalScopeMenu->FindCommand(strs);
-    */
 }
 
 size_t CliSession::PromptImpl()
@@ -241,7 +233,22 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
             return {};
         }
 
-        return { nullptr, param, completions };
+        if (m_previousCompletions != completions)
+        {
+            m_menuParamIndex = 0;
+            m_previousCompletions = completions;
+        }
+
+        auto paramIndex = m_menuParamIndex;
+        m_menuParamIndex = (m_menuParamIndex + 1) % completions.size();
+
+        if (paramIndex > 0)
+        {
+            completions.insert(completions.end(), completions.begin(), completions.begin() + paramIndex);
+            completions.erase(completions.begin(), completions.begin() + paramIndex);
+        }
+
+        return { nullptr, paramIndex, completions };
     }
 
     // It's not possible to do menu auto-complete within the menu command as it doesn't know about

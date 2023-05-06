@@ -13,6 +13,15 @@ namespace detail
 	public:
 		std::string text;
 		std::string description;
+
+		bool operator!=(const AutoCompletion& other) const
+		{
+			return text != other.text && description != other.description;
+		}
+		bool operator==(const AutoCompletion& other) const
+		{
+			return !(*this != other);
+		}
 	};
 
 	inline std::vector<std::string> GetTextCompletions(const std::vector<AutoCompletion>& completions)
