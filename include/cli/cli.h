@@ -384,7 +384,6 @@ namespace cli
 
         std::vector<CommandParams> GetCommands(std::vector<std::string> params, size_t currentParam = 0) const
         {
-            //size_t currentParamCount = currentParam + 1;
             size_t param = 0;
             for (auto& cmd : *cmds)
             {
@@ -411,6 +410,7 @@ namespace cli
                     return results;
                 }
             }
+
             return {};
         }
 
@@ -604,8 +604,8 @@ namespace cli
 
         void SetRootMenu(std::shared_ptr<Command> inRootMenu)
         {
-            currentGlobalScopeMenu.reset(new Command(""));
-            currentGlobalScopeMenu->TransferRootCommands(*inRootMenu);
+            //currentGlobalScopeMenu.reset(new Command(""));
+            //currentGlobalScopeMenu->TransferRootCommands(*inRootMenu);
             cli.SetRootMenu(inRootMenu);
 
             current = inRootMenu.get();
@@ -613,6 +613,7 @@ namespace cli
 
         void Current(Command* menu)
         {
+            m_menuParamIndex = 0;
             current = menu;
         }
 
@@ -658,6 +659,11 @@ namespace cli
         Cli& cli;
         std::shared_ptr<cli::OutStream> coutPtr;
         Command* current;
+        
+        // Param index to use for command matching (rather than param matching)
+        AutoCompleter::Completions m_previousCompletions;
+        size_t m_menuParamIndex = 0;
+
         // Globals attached to current
         std::unique_ptr<Command> currentGlobalScopeMenu;
         // Globals attached to the CLI
