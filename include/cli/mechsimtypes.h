@@ -29,7 +29,7 @@ namespace cli
 		return os;
 	}
 
-	inline std::ostream& operator<<(std::ostream& os, MechSim::ObjectHandle object)
+	inline std::ostream& operator<<(std::ostream& os, MechSim::ObjectHandleAny object)
 	{
 		os << *object.Get<MechSim::Object>();
 		return os;
