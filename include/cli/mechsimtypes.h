@@ -75,14 +75,16 @@ namespace cli
 		auto* object = MechSim::GetObjectRegistry().Get(objectId);
 		if (!object)
 		{
-			out << "Invalid object id '" << objectIdStr << "' for '" << paramName << "'\n";
+			out << Style::Red() << "Invalid object id " << reset
+				<< "'" << objectIdStr << "' for '" << paramName << "'\n";
 			return nullptr;
 		}
 
 		T* specificObject = dynamic_cast<T*>(object);
 		if (!specificObject)
 		{
-			out << "Object id " << objectId << " refers to '" << object->GetName()
+			out << Style::Error("Object id ") << reset 
+				<< objectId << " refers to '" << object->GetName()
 				<< "' which is not a '" << paramName << "'\n";
 			return nullptr;
 		}
@@ -185,6 +187,28 @@ namespace cli
 						return false;
 					}
 					return MechSim::Game::GetInstance().m_controllerToMount->CanControl(obj);
+				};
+			}
+		};
+
+		struct NotInstalled
+		{
+			static FilterFn Get()
+			{
+				return [](const MechSim::Object* obj)
+				{
+					return obj->GetId().GetRootId() == MechSim::WorldObjectId;
+				};
+			}
+		};
+
+		struct IsMech
+		{
+			static FilterFn Get()
+			{
+				return [](const MechSim::Object* obj)
+				{
+					return obj->GetId().GetLeaf().second == 0;
 				};
 			}
 		};
@@ -292,7 +316,7 @@ namespace cli
 				m_id = static_cast<size_t>(*val);
 				return true;
 			}
-			out << paramName << ": received invalid id " << idStr << "\n";
+			out << Style::Error(paramName + ": received invalid id ") << idStr << "\n";
 			return false;
 		}
 
@@ -304,6 +328,27 @@ namespace cli
 		size_t m_id = std::numeric_limits<size_t>::max();
 	};
 
+	class ModuleSlotId : public Id
+	{
+	public:
+		static AutoCompleter::Completions GetCompletions()
+		{
+			AutoCompleter::Completions results;
+			const auto& slots = MechSim::Game::GetInstance().m_activeModule->DescribeSlots();
+			size_t id = 0;
+			for (const std::string& slot : slots)
+			{
+				results.push_back({ std::to_string(id++), slot });
+			}
+			return results;
+		}
+	protected:
+		bool Validate(size_t id) const override
+		{
+			return id < MechSim::Game::GetInstance().m_activeModule->GetSlotCount();
+		}
+	};
+
 	class MechId : public Id
 	{
 	public:
@@ -313,7 +358,7 @@ namespace cli
 			const auto& allRootObjectIds = MechSim::ObjectRegistry::GetInstance().GetAllRootObjects();
 			for (const auto& mechId : allRootObjectIds)
 			{
-				results.push_back({ std::to_string(mechId), "Mech description here..." });
+				results.push_back({ mechId.ToString(), "Mech description here..."});
 			}
 			return results;
 		}
@@ -333,49 +378,6 @@ namespace cli
 				[objId](const auto& mechId) { return mechId == objId; });
 
 			return iter != allRootObjectIds.end();
-		}
-	};
-
-	class ModuleId : public Id
-	{
-	public:
-		static AutoCompleter::Completions GetCompletions()
-		{
-			AutoCompleter::Completions results;
-			auto modules = MechSim::GetMech().GetModules();
-			for (const auto* module : modules)
-			{
-				results.push_back({ module->GetId().ToString(), module->GetDescription() });
-			}
-			return results;
-		}
-
-	protected:
-		bool Validate(size_t id) const override
-		{
-			return id < MechSim::GetMech().GetModuleCount();
-		}
-	};
-
-	class ModuleSlotId : public Id
-	{
-	public:
-		static AutoCompleter::Completions GetCompletions()
-		{
-			AutoCompleter::Completions results;
-			const auto& slots = MechSim::Game::GetInstance().m_activeModule->DescribeSlots();
-			size_t id = 0;
-			for (const std::string& slot : slots)
-			{
-				results.push_back({ std::to_string(id++), slot });
-			}
-			return results;
-		}
-
-	protected:
-		bool Validate(size_t id) const override
-		{
-			return id < MechSim::Game::GetInstance().m_activeModule->GetSlotCount();
 		}
 	};
 
@@ -607,7 +609,6 @@ namespace cli
 	
 	// Uses default Create path for FromString
 	DEFINE_BASIC_FROM_STRING(MechId);
-	DEFINE_BASIC_FROM_STRING(ModuleId);
 	DEFINE_BASIC_FROM_STRING(ModuleSlotId);
 	DEFINE_BASIC_FROM_STRING(CircuitId);
 	DEFINE_BASIC_FROM_STRING(ReactorLine);

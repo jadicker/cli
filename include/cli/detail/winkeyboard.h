@@ -37,6 +37,12 @@
 #include <conio.h>
 #include <cassert>
 
+#define WIDE_CHAR 0
+#if WIDE_CHAR
+#include <locale>
+#include <codecvt>
+#endif
+
 #include "inputdevice.h"
 
 #if !defined(NOMINMAX)
@@ -132,6 +138,7 @@ private:
     {
         is.WaitKbHit();
 
+#if !WIDE_CHAR
         int c = _getch();
         switch (c)
         {
@@ -170,6 +177,50 @@ private:
             }
         }
         return std::make_pair(KeyType::ignored, ' ');
+#else
+        wint_t c = _getwch();
+        switch (c)
+        {
+        case EOF:
+        case 4:  // EOT ie CTRL-D
+        case 26: // CTRL-Z
+        case 3:  // CTRL-C
+            return std::make_pair(KeyType::eof, ' ');
+            break;
+
+        case 224: // symbol
+        {
+            c = _getwch();
+            switch (c)
+            {
+            case 72: return std::make_pair(KeyType::up, ' ');
+            case 80: return std::make_pair(KeyType::down, ' ');
+            case 75: return std::make_pair(KeyType::left, ' ');
+            case 77: return std::make_pair(KeyType::right, ' ');
+            case 71: return std::make_pair(KeyType::home, ' ');
+            case 79: return std::make_pair(KeyType::end, ' ');
+            case 83: return std::make_pair(KeyType::canc, ' ');
+            default: return std::make_pair(KeyType::ignored, ' ');
+            }
+        }
+        case 8:
+            return std::make_pair(KeyType::backspace, c);
+            break;
+        case 13:
+            return std::make_pair(KeyType::ret, c);
+            break;
+        default: // hopefully ascii
+        {
+            std::u16string source(1, c);
+            std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t> convert;
+            std::string dest = convert.to_bytes(source);
+            //const char ch = static_cast<char>(c);
+            return std::make_pair(KeyType::ascii, dest);
+        }
+        }
+        return std::make_pair(KeyType::ignored, ' ');
+#endif
+
     }
 
     InputSource is;

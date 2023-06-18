@@ -46,7 +46,11 @@ class InputDevice
 public:
     using Handler = std::function< void( std::pair<KeyType,char> ) >;
 
-    explicit InputDevice(Scheduler& _scheduler) : scheduler(_scheduler) {}
+    explicit InputDevice(Scheduler& _scheduler) 
+        :scheduler(_scheduler)
+    {
+    }
+
     virtual ~InputDevice() = default;
 
     template <typename H>

@@ -236,29 +236,6 @@ namespace cli
     };
 
     // ********************************************************************
-    // free utility function to get completions from a list of commands and the current line
-#if 0
-    inline AutoCompleter::Completions GetCompletions(
-        const std::shared_ptr<std::vector<std::shared_ptr<Command>>>& cmds,
-        const std::vector<std::string>& params,
-        const size_t currentParam,
-        const size_t inputParam)
-    {
-        AutoCompleter::Completions result;
-        std::for_each(cmds->begin(), cmds->end(),
-            [currentParam, inputParam, &result, &params = std::as_const(params)](const auto& cmd)
-            {
-                auto c = cmd->GetCompletions(params, currentParam, inputParam);
-                std::for_each(c.begin(), c.end(), [&result](const auto& completion)
-                    {
-                        result.push_back(completion);
-                    });
-            });
-        return result;
-    }
-#endif
-
-    // ********************************************************************
 
 
     class CmdHandler;
@@ -548,6 +525,18 @@ namespace cli
 
         size_t m_commandAutoCompleteIndex = 0;
 
+        const Command* GetCommand(const std::string& name) const
+        {
+            for (const auto& cmd : *cmds)
+            {
+                if (cmd->Name() == name)
+                {
+                    return cmd.get();
+                }
+            }
+            return nullptr;
+        }
+
     protected:
         bool IsEnabled() const { return enabled; }
 
@@ -608,13 +597,13 @@ namespace cli
             //currentGlobalScopeMenu->TransferRootCommands(*inRootMenu);
             cli.SetRootMenu(inRootMenu);
 
-            current = inRootMenu.get();
+            m_current = inRootMenu.get();
         }
 
         void Current(Command* menu)
         {
             m_menuParamIndex = 0;
-            current = menu;
+            m_current = menu;
         }
 
         std::ostream& OutStream() { return out; }
@@ -658,7 +647,7 @@ namespace cli
 
         Cli& cli;
         std::shared_ptr<cli::OutStream> coutPtr;
-        Command* current;
+        Command* m_current;
         
         // Param index to use for command matching (rather than param matching)
         AutoCompleter::Completions m_previousCompletions;
@@ -668,6 +657,7 @@ namespace cli
         std::unique_ptr<Command> currentGlobalScopeMenu;
         // Globals attached to the CLI
         std::unique_ptr<Command> globalScopeMenu;
+        const Command* m_exitCommand = nullptr;
         std::ostream& out;
         std::function< void(std::ostream&)> exitAction = []( std::ostream& ){};
         detail::History history;

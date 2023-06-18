@@ -553,6 +553,9 @@ private:
 
     void Up(size_t lines)
     {
+        // BUG:  If you scroll down into "empty buffer space" and run this it
+        //       scrolls back up in an undesirable way
+        // It's possible this isn't worth fixing...
         if (lines == 0 || m_cursorY == 0) { return; }
 
         std::stringstream token;

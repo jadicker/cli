@@ -1,4 +1,4 @@
-
+﻿
 #include "../include/cli/cli.h"
 
 using namespace cli;
@@ -26,7 +26,7 @@ bool Command::Exec(const std::vector<std::string>& cmdLine, CliSession& session)
 CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
     cli(_cli),
     coutPtr(Cli::CoutPtr()),
-    current(cli.RootMenu()),
+    m_current(cli.RootMenu()),
     globalScopeMenu(std::make_unique< Command >()),
     out(_out),
     history(historySize)
@@ -48,6 +48,9 @@ CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
         [this](std::ostream&) { Exit(); },
         "Quit the session"
     );
+
+    m_exitCommand = globalScopeMenu->GetCommand("exit");
+
 #ifdef CLI_HISTORY_CMD
     globalScopeMenu->Insert(
         "history",
@@ -64,6 +67,8 @@ bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
         out << cmd << "\n";
     }
 
+    auto* currentCommand = m_current;
+
     std::vector<std::string> strs;
     detail::split(strs, cmd);
     if (strs.empty()) return false; // just hit enter
@@ -75,7 +80,7 @@ bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
 
     try
     {
-        auto result = current->ScanCmds(strs, *this);
+        auto result = m_current->ScanCmds(strs, *this);
 
         if (result.second == Command::ScanResultAction::NoneFound)
         {
@@ -95,7 +100,9 @@ bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
             {
                 if (result.first.empty())
                 {
-                    out << "Command '" << Style::Command() << strs[0] << reset << "' not found.\n";
+                    out << Style::Red() << "Command " << reset
+                        << "'" << Style::Command() << strs[0] << reset
+                        << "' not found.\n";
                 }
                 else if (result.first.size() == 1)
                 {
@@ -114,10 +121,12 @@ bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
         }
         else
         {
-            // - 1 because the leaf command isn't a menu
-            for (size_t i = 0; i < result.first.size() - 1; ++i)
+            // There's only 2 cases in which we don't go back to our previous menu:
+            //  - if the leaf command that executed has children, meaning it's a submenu.
+            //  - exit was called
+            if (!result.first.back()->HasChildren() && result.first.back() != m_exitCommand)
             {
-                Exit();
+                m_current = currentCommand;
             }
         }
 
@@ -161,7 +170,7 @@ const Command* CliSession::GetCurrentCommand(const std::string& line) const
         return nullptr;
     }
 
-    auto commands = current->GetCurrentCommands(line);
+    auto commands = m_current->GetCurrentCommands(line);
     if (!commands.empty())
     {
         return &commands.back().m_command.get();
@@ -178,29 +187,49 @@ const Command* CliSession::GetCurrentCommand(const std::string& line) const
 
 size_t CliSession::PromptImpl()
 {
-    if (exit || !current) return 0;
+    if (exit || !m_current) return 0;
 
-    auto prompt = current->Prompt();
-    std::string suffix = "> ";
+    std::vector<Command*> commands;
+    Command* cur = m_current;
+    do
+    {
+        commands.push_back(cur);
+        cur = cur->GetParent();
+    } while (cur);
+
+    std::string prompt;
+    for (auto iter = commands.rbegin(); iter != commands.rend(); ++iter)
+    {
+        // More interesting symbols that work ○•⁃◘◙π
+        prompt += u8">" + (*iter)->Name();
+    }
+
+    prompt += u8">";
+
+    //auto prompt = current->Prompt();
+    std::string suffix = u8"  ╰╴>  ";
+    // Now that it's utf8, size() won't give us chars
+    size_t suffixChars = 7;
     out << beforePrompt
         << prompt
-        << afterPrompt
-        << suffix
+        << afterPrompt << "\n"
+        << ColorHelper{52, 144, 111} << suffix << afterPrompt
         << std::flush;
 
-    return prompt.size() + suffix.size();
+    return suffixChars;
 }
 
 void CliSession::Help() const
 {
     out << "Commands available:\n";
     globalScopeMenu->MainHelp(out);
-    current->MainHelp(out);
+    m_current->MainHelp(out);
 }
 
 void CliSession::Exit()
 {
-    if (current = current->GetParent())
+    m_current = m_current->GetParent();
+    if (m_current)
     {
         return;
     }
@@ -219,7 +248,7 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
     std::vector<std::string> params;
     detail::split(params, currentLine);
 
-    auto commands = current->GetCommands(params, param);
+    auto commands = m_current->GetCommands(params, param);
 
     size_t currentParam = 0;
     std::for_each(commands.begin(), commands.end(),
@@ -227,7 +256,7 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
 
     if (commands.empty())
     {
-        auto completions = current->GetChildCommandCompletions(params.empty() ? "" : params[0]);
+        auto completions = m_current->GetChildCommandCompletions(params.empty() ? "" : params[0]);
         if (completions.empty())
         {
             return {};
@@ -275,7 +304,8 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
     {
         Command& cmd = commands[i].m_command.get();
 
-        if (paramOffset + commands[i].m_paramsFound >= params.size())
+        // Guard against attempting to call the function with not enough parameters
+        if (paramOffset + cmd.GetParamCount() >= params.size())
         {
             break;
         }

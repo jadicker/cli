@@ -98,6 +98,16 @@ namespace Style
     }
 
     extern std::string BGColor(unsigned char red, unsigned char green, unsigned char blue);
+
+    class Error
+    {
+    public:
+        Error(std::string&& message)
+            : m_message(std::move(message))
+        {}
+
+        std::string m_message;
+    };
 }
 
 inline std::ostream& operator<<(std::ostream& os, ColorHelper color)
@@ -160,6 +170,12 @@ inline std::ostream& operator<<(std::ostream& os, StyleHelper<ColorEnumT> style)
 inline std::ostream& operator<<(std::ostream& os, Reset)
 {
     os << detail::rang::style::reset;
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const Style::Error& error)
+{
+    os << Style::Red() << error.m_message << reset;
     return os;
 }
 
