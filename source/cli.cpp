@@ -27,6 +27,7 @@ CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
     cli(_cli),
     coutPtr(Cli::CoutPtr()),
     m_current(cli.RootMenu()),
+    m_rootMenu(m_current),
     globalScopeMenu(std::make_unique< Command >()),
     out(_out),
     history(historySize)
@@ -85,7 +86,6 @@ bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
         if (result.second == Command::ScanResultAction::NoneFound)
         {
             result = cli.rootMenu->ScanCmds(strs, *this);
-            //result = currentGlobalScopeMenu->ScanCmds(strs, *this);
         }
 
         // root menu recursive cmds check
@@ -204,15 +204,15 @@ size_t CliSession::PromptImpl()
         prompt += u8">" + (*iter)->Name();
     }
 
-    prompt += u8">";
-
-    //auto prompt = current->Prompt();
-    std::string suffix = u8"  ╰╴>  ";
+    // TODO: To have unicode characters in the prompt, all substring work in terminal.h
+    //       will have to be fixed
+    //std::string suffix = u8"  ╰╴>  ";
+    std::string suffix = "  \\-> ";
     // Now that it's utf8, size() won't give us chars
-    size_t suffixChars = 7;
+    size_t suffixChars = 6;
     out << beforePrompt
         << prompt
-        << afterPrompt << "\n"
+        << afterPrompt << std::endl
         << ColorHelper{52, 144, 111} << suffix << afterPrompt
         << std::flush;
 
@@ -243,12 +243,26 @@ void CliSession::Exit()
     exit = true; // prevent the prompt to be shown
 }
 
-CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine, const size_t param)
+CliSession::CompletionResults CliSession::GetCompletionsImpl(Command* command,
+    std::string currentLine,
+    const size_t param,
+    const bool recursive /* = true */)
 {
     std::vector<std::string> params;
     detail::split(params, currentLine);
 
-    auto commands = m_current->GetCommands(params, param);
+    auto commands = command->GetCommands(params, param);
+    /*
+    if (commands.empty())
+    {
+        return { nullptr, param, {} };
+    }
+    */
+
+    if (!recursive && commands.empty())
+    {
+        return {};
+    }
 
     size_t currentParam = 0;
     std::for_each(commands.begin(), commands.end(),
@@ -256,7 +270,7 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
 
     if (commands.empty())
     {
-        auto completions = m_current->GetChildCommandCompletions(params.empty() ? "" : params[0]);
+        auto completions = command->GetChildCommandCompletions(params.empty() ? "" : params[0]);
         if (completions.empty())
         {
             return {};
@@ -294,7 +308,16 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
         }
 
         // Rotate completion logic
-        return { &commands.back().m_command.get(), param, completions };
+        auto paramIndex = m_menuParamIndex;
+        m_menuParamIndex = (m_menuParamIndex + 1) % completions.size();
+        
+        if (paramIndex > 0)
+        {
+            completions.insert(completions.end(), completions.begin(), completions.begin() + paramIndex);
+            completions.erase(completions.begin(), completions.begin() + paramIndex);
+        }
+
+        return { &commands.back().m_command.get(), paramIndex, completions };
     }
 
     bool valid = true;
@@ -343,6 +366,24 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
     }
 
     return { &commands.back().m_command.get(), param, results };
+}
+
+CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine, const size_t param)
+{
+    auto completions = GetCompletionsImpl(m_current, currentLine, param);
+    if (completions.m_completions.empty())
+    {
+        if (m_rootMenu)
+        {
+            completions = GetCompletionsImpl(m_rootMenu, currentLine, param);
+        }
+
+        if (completions.m_completions.empty())
+        {
+            completions = GetCompletionsImpl(globalScopeMenu.get(), currentLine, param, false);
+        }
+    }
+    return completions;
 }
 
 detail::AutoCompletion CliSession::GetCurrentCommandCompletion(const std::string& line) const

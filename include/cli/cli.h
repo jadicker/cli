@@ -50,6 +50,42 @@
 
 class ConsoleTestRunner;
 
+struct Utf8StringInfo
+{
+    size_t charCount = 0;
+    size_t extraBytes = 0;	// Bytes used by utf8 extension
+};
+
+static Utf8StringInfo GetUtf8Info(const std::string& str)
+{
+    Utf8StringInfo info;
+    bool onExtendedChar = false;
+
+    const char* c = str.c_str();
+    for (size_t i = 0; i < str.size(); i++)
+    {
+        if ((0x80 & str[i]) > 0)
+        {
+            if (onExtendedChar)
+            {
+                info.extraBytes++;
+            }
+            else
+            {
+                onExtendedChar = true;
+                info.charCount++;
+            }
+            
+            continue;
+        }
+        onExtendedChar = false;
+
+        info.charCount++;
+    }
+
+    return info;
+}
+
 namespace cli
 {
     // ********************************************************************
@@ -85,6 +121,37 @@ namespace cli
             return str.str();
         }
     };
+
+    static std::string Pad(const std::string& str, size_t count)
+    {
+        std::string out;
+        out.reserve(count);
+        for (size_t i = 0; i < count; ++i)
+        {
+            out += str;
+        }
+        return out;
+    }
+
+    static size_t get_n_chars_from_back_utf8(const std::string& str, size_t n)
+    {
+        const char* c = str.c_str();
+        for (int i = static_cast<int>(str.size()) - 1; i >= 0; --i)
+        {
+            if ((0x80 & str[i]) > 0)
+            {
+                continue;
+            }
+
+            --n;
+            if (n == 0)
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
 
     // ********************************************************************
 
@@ -367,24 +434,7 @@ namespace cli
                 auto cmdResults = cmd->GetCommandsImpl(params, param);
                 if (!cmdResults.empty())
                 {
-                    if (cmdResults.size() > 1)
-                    {
-                        // Can't guess at which command is right, so return what we got
-                        return cmdResults;
-                    }
-
-                    // Single command?  Let's try to complete children
-                    auto results = cmdResults;
-                    auto& foundCommand = results[0].m_command.get();
-                    params.erase(params.begin(), params.begin() + results[0].m_paramsFound);
-                    
-                    if (results[0].m_paramsFound == foundCommand.GetParamCount() && !params.empty())
-                    {
-                        auto childResult = foundCommand.GetCommands(params, currentParam + foundCommand.GetParamCount());
-                        results.insert(results.end(), childResult.begin(), childResult.end());
-                    }
-                    
-                    return results;
+                    return cmdResults;
                 }
             }
 
@@ -394,14 +444,15 @@ namespace cli
         std::vector<CommandParams> GetCommandsImpl(const std::vector<std::string>& params,
             const size_t currentParam) const
         {
-            size_t paramCount = MatchCommand(params);
+            size_t paramCount = MatchCommand(params, currentParam);
             if (paramCount == 0)
             {
                 return {};
             }
 
             std::vector<CommandParams> commands;
-            commands.push_back({ *const_cast<Command*>(this), std::min(GetParamCount(), params.size()) });
+            //commands.push_back({ *const_cast<Command*>(this), std::min(GetParamCount(), params.size()) });
+            commands.push_back({ *const_cast<Command*>(this), std::min(GetParamCount(), paramCount) });
 
             size_t nextParam = currentParam + paramCount;
             // If we have enough paramaters and still have more param input left, keep going
@@ -439,11 +490,11 @@ namespace cli
         }
 
         // Returns how many parameters to eat, returns 0 if there is no match
-        size_t MatchCommand(const std::vector<std::string>& params) const
+        size_t MatchCommand(const std::vector<std::string>& params, size_t commandPosition = 0) const
         {
             if (!enabled) { return 0; }
 
-            if (params.empty() || !MatchCommandName(params[0]))
+            if (params.empty() || !MatchCommandName(params[commandPosition]))
             {
                 return 0;
             }
@@ -452,7 +503,7 @@ namespace cli
             size_t i;
             for (i = 0; i < GetParamCount() - 1; ++i)
             {
-                auto param = i + 1;
+                auto param = i + 1 + commandPosition;
                 if (param >= params.size())
                 {
                     break;
@@ -598,6 +649,7 @@ namespace cli
             cli.SetRootMenu(inRootMenu);
 
             m_current = inRootMenu.get();
+            m_rootMenu = m_current;
         }
 
         void Current(Command* menu)
@@ -645,6 +697,11 @@ namespace cli
         virtual void SetPromptSize(size_t size) {}
         size_t PromptImpl();
 
+        CompletionResults GetCompletionsImpl(Command* command,
+            std::string currentLine,
+            size_t param,
+            const bool recursive = true);
+
         Cli& cli;
         std::shared_ptr<cli::OutStream> coutPtr;
         Command* m_current;
@@ -657,6 +714,7 @@ namespace cli
         std::unique_ptr<Command> currentGlobalScopeMenu;
         // Globals attached to the CLI
         std::unique_ptr<Command> globalScopeMenu;
+        Command* m_rootMenu;
         const Command* m_exitCommand = nullptr;
         std::ostream& out;
         std::function< void(std::ostream&)> exitAction = []( std::ostream& ){};
@@ -994,7 +1052,7 @@ namespace cli
                 {
                     session.Current(this);
                 }
-                return true;
+                return success;
             }
             return false;
         }

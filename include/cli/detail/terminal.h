@@ -1040,7 +1040,11 @@ inline void Terminal::SetCompletions(size_t param, const std::vector<AutoComplet
     CreateLines(2);
 
     auto firstCompletion = completions[0].text;
-    if (m_autoCompleteStart >= (paramInfo.startPos + m_promptSize))
+    std::string paramToken = m_currentLine.substr(paramInfo.startPos,
+        (GetInputPosition() - paramInfo.startPos) + 1);
+    bool paramTokenStartsCompletion = completions[0].text.find(paramToken) == 0;
+    if (paramTokenStartsCompletion &&
+        m_autoCompleteStart >= (paramInfo.startPos + m_promptSize))
     {
         const size_t autoCompleteStartIndex = (m_autoCompleteStart - m_promptSize) - paramInfo.startPos;
         if (firstCompletion.size() > autoCompleteStartIndex)
@@ -1049,8 +1053,10 @@ inline void Terminal::SetCompletions(size_t param, const std::vector<AutoComplet
         }
     }
 
-    auto paramToken = m_currentLine.substr(paramInfo.startPos, (GetInputPosition() - paramInfo.startPos) + 1);
-    if (completions[0].text.find(paramToken) != 0)
+    
+    //paramToken = transformForStupidObjectIdCase(paramToken, completions[0].text);
+
+    if (!paramTokenStartsCompletion)
     {
         // Our filter failed, so wipe it
         // TODO: This is a choice, instead we could accept nothing and leave the param as-is
