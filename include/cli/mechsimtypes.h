@@ -19,7 +19,8 @@ namespace cli
 {
 	inline std::ostream& operator<<(std::ostream& os, MechSim::ObjectId objectId)
 	{
-		os << Style::ObjectId() << objectId.ToString(false) << reset;
+		os << Style::ObjectId() << objectId.ToString(false) << " (" << GetObjectName(objectId) << ")"
+		   << reset;
 		return os;
 	}
 
@@ -248,6 +249,7 @@ namespace cli
 		T& Get() { return *m_object; }
 
 		MechSim::ObjectId GetId() const { return m_object ? m_object->GetId() : MechSim::NullObjectId; }
+		MechSim::ObjectGUID GetGUID() const { return m_object->GetGUID(); }
 
 		MechSim::Object* GetObj() { return dynamic_cast<MechSim::Object*>(m_object); }
 		const MechSim::Object* GetObj() const { return dynamic_cast<MechSim::Object*>(m_object); }
