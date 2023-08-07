@@ -1,6 +1,8 @@
 ﻿
 #include "../include/cli/cli.h"
 
+#include <MechSim/Misc/Event.h>
+
 using namespace cli;
 
 bool Command::Exec(const std::vector<std::string>& cmdLine, CliSession& session)
@@ -61,11 +63,20 @@ CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
 #endif
 }
 
-bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
+std::ostream& CliSession::OutStream()
+{
+    if (m_silent)
+    {
+        return m_nullOut;
+    }
+    return out;
+}
+
+bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCmd, bool silentOutput)
 {
     if (printCmd)
     {
-        out << cmd << "\n";
+        OutStream() << cmd << "\n";
     }
 
     auto* currentCommand = m_current;
@@ -74,7 +85,7 @@ bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
     detail::split(strs, cmd);
     if (strs.empty()) return false; // just hit enter
 
-    if (!silent)
+    if (!dontSaveCommand)
     {
         history.NewCommand(cmd); // add anyway to history
     }
@@ -96,26 +107,23 @@ bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
 
         if (result.second != Command::ScanResultAction::Executed)
         {
-            if (!silent)
+            if (result.first.empty())
             {
-                if (result.first.empty())
+                OutStream() << Style::Red() << "Command " << reset
+                            << "'" << Style::Command() << strs[0] << reset
+                            << "' not found.\n";
+            }
+            else if (result.first.size() == 1)
+            {
+                result.first.back()->Help(OutStream());
+            }
+            else
+            {
+                OutStream() << "Which '" << Style::Command() << strs[0] << reset << "'?  Could be:\n";
+                for (const auto& cmd : result.first)
                 {
-                    out << Style::Red() << "Command " << reset
-                        << "'" << Style::Command() << strs[0] << reset
-                        << "' not found.\n";
-                }
-                else if (result.first.size() == 1)
-                {
-                    result.first.back()->Help(out);
-                }
-                else
-                {
-                    out << "Which '" << Style::Command() << strs[0] << reset << "'?  Could be:\n";
-                    for (const auto& cmd : result.first)
-                    {
-                        out << "\t";
-                        cmd->Help(out);
-                    }
+                    OutStream() << "\t";
+                    cmd->Help(OutStream());
                 }
             }
         }
@@ -134,29 +142,26 @@ bool CliSession::Feed(const std::string& cmd, bool silent, bool printCmd)
     }
     catch (const std::exception& e)
     {
-        cli.StdExceptionHandler(out, cmd, e);
+        cli.StdExceptionHandler(OutStream(), cmd, e);
     }
     catch (...)
     {
-        if (!silent)
-        {
-            out << "Cli. Unknown exception caught handling command line \""
-                << cmd
-                << "\"\n";
-        }
+        OutStream() << "Cli. Unknown exception caught handling command line \""
+                    << cmd
+                    << "\"\n";
     }
 
     return false;
 }
 
-void CliSession::RunProgram(const std::string& name, const std::vector<std::string>& program, bool silent)
+void CliSession::RunProgram(const std::string& name, const std::vector<std::string>& program)
 {
-    out << "Executing program " << name << "...\n";
+    OutStream() << "Executing program " << name << "...\n";
 
     for (const auto& line : program)
     {
         Prompt();
-        Feed(line, silent, true);
+        Feed(line, true);
     }
 }
 
@@ -210,7 +215,7 @@ size_t CliSession::PromptImpl()
     std::string suffix = "  \\-> ";
     // Now that it's utf8, size() won't give us chars
     size_t suffixChars = 6;
-    out << beforePrompt
+    OutStream() << beforePrompt
         << prompt
         << afterPrompt << std::endl
         << ColorHelper{52, 144, 111} << suffix << afterPrompt
@@ -461,6 +466,8 @@ Command::ScanResult Command::ScanCmds(const std::vector<std::string>& cmdLine, C
         }
         ++executed;
     }
+
+    MechSim::EventManager::GetInstance().Flush();
 
     return results;
 }

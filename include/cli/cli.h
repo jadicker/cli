@@ -86,6 +86,20 @@ static Utf8StringInfo GetUtf8Info(const std::string& str)
     return info;
 }
 
+class OnScopeExit final
+{
+public:
+    OnScopeExit(std::function<void()> func) : m_func(func)
+    {}
+    ~OnScopeExit()
+    {
+        m_func();
+    }
+
+private:
+    std::function<void()> m_func;
+};
+
 namespace cli
 {
     // ********************************************************************
@@ -451,7 +465,6 @@ namespace cli
             }
 
             std::vector<CommandParams> commands;
-            //commands.push_back({ *const_cast<Command*>(this), std::min(GetParamCount(), params.size()) });
             commands.push_back({ *const_cast<Command*>(this), std::min(GetParamCount(), paramCount) });
 
             size_t nextParam = currentParam + paramCount;
@@ -633,9 +646,17 @@ namespace cli
         CliSession(CliSession&&) = delete;
         CliSession& operator = (CliSession&&) = delete;
 
-        bool Feed(const std::string& cmd, bool silent = false, bool printCmd = false);
+        void SetSilent(bool silent)
+        {
+            m_silent = silent;
+        }
 
-        void RunProgram(const std::string& name, const std::vector<std::string>& program, bool silent = false);
+        bool Feed(const std::string& cmd,
+            bool dontSaveCommand = false,
+            bool printCmd = false,
+            bool silentOutput = false);
+
+        void RunProgram(const std::string& name, const std::vector<std::string>& program);
 
         void Prompt()
         {
@@ -658,7 +679,7 @@ namespace cli
             m_current = menu;
         }
 
-        std::ostream& OutStream() { return out; }
+        std::ostream& OutStream();
 
         void Help() const;
 
@@ -717,9 +738,11 @@ namespace cli
         Command* m_rootMenu;
         const Command* m_exitCommand = nullptr;
         std::ostream& out;
+        std::ofstream m_nullOut;
         std::function< void(std::ostream&)> exitAction = []( std::ostream& ){};
         detail::History history;
         bool exit{ false }; // to prevent the prompt after exit command
+        bool m_silent = false;
     };
 
     // ********************************************************************

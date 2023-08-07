@@ -198,7 +198,8 @@ namespace cli
 			{
 				return [](const MechSim::Object* obj)
 				{
-					return obj->GetId().GetRootId() == MechSim::WorldObjectId;
+					return obj->GetId().GetRootId() == MechSim::WorldObjectId
+						|| obj->GetId().GetRootId() == MechSim::AnonObjectId;
 				};
 			}
 		};
