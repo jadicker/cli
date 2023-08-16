@@ -206,7 +206,7 @@ size_t CliSession::PromptImpl()
     for (auto iter = commands.rbegin(); iter != commands.rend(); ++iter)
     {
         // More interesting symbols that work ○•⁃◘◙π
-        prompt += u8">" + (*iter)->Name();
+        prompt += u8">" + (*iter)->GetPromptDisplay();
     }
 
     // TODO: To have unicode characters in the prompt, all substring work in terminal.h

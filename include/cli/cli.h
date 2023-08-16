@@ -583,6 +583,15 @@ namespace cli
         const std::string& Name() const { return name; }
         const std::string& Description() const { return description; }
 
+        const std::string GetPromptDisplay() const
+        {
+            if (m_displayFunc)
+            {
+                return (*m_displayFunc)();
+            }
+            return name;
+        }
+
         // Includes this name
         virtual size_t GetParamCount() const { return 1; }
         virtual bool ValidateParam(const std::string& param, const size_t paramIndex) const { return false; }
@@ -601,12 +610,16 @@ namespace cli
             return nullptr;
         }
 
+        using PromptDisplayFn = std::function<std::string()>;
+        void SetDisplayFunc(PromptDisplayFn displayFunc) { m_displayFunc = displayFunc; }
+
     protected:
         bool IsEnabled() const { return enabled; }
 
         const std::string description;
 
     private:
+        std::optional<PromptDisplayFn> m_displayFunc;
         const std::string name;
         bool enabled;
 
