@@ -384,41 +384,6 @@ namespace cli
 		}
 	};
 
-	class CircuitId : public Id
-	{
-	public:
-		static AutoCompleter::Completions GetCompletions()
-		{
-			AutoCompleter::Completions results;
-			auto& circuits = MechSim::GetMech().GetAllCircuits();
-			for (size_t i = 0; i < circuits.size(); ++i)
-			{
-				const auto& circuit = circuits[i];
-				std::stringstream str;
-				str << i;
-				results.push_back({ str.str(), "Circuit desc here"});
-			}
-			return results;
-		}
-
-	protected:
-		bool Validate(size_t id) const override
-		{
-			if (id == std::numeric_limits<size_t>::max())
-			{
-				return false;
-			}
-
-			const auto& mech = MechSim::GetMech();
-			if (id >= mech.GetAllCircuits().size())
-			{
-				return false;
-			}
-
-			return true;
-		}
-	};
-
 	class ReactorLine : public Id
 	{
 	public:
@@ -613,7 +578,6 @@ namespace cli
 	// Uses default Create path for FromString
 	DEFINE_BASIC_FROM_STRING(MechId);
 	DEFINE_BASIC_FROM_STRING(ModuleSlotId);
-	DEFINE_BASIC_FROM_STRING(CircuitId);
 	DEFINE_BASIC_FROM_STRING(ReactorLine);
 	DEFINE_BASIC_FROM_STRING(ValidReactorLine);
 	DEFINE_BASIC_FROM_STRING(PartName);
