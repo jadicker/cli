@@ -125,16 +125,28 @@ namespace cli
 			return &m_completions[(m_current + 1 + i) % size];
 		}
 
-		Completions GetAutoCompletions(size_t cur) const
+		Completions GetAutoCompletions(size_t cur, const std::string& paramStr) const
 		{
 			size_t count = m_completions.size();
 			Completions completions;
 			completions.reserve(count);
-			completions.push_back(m_completions[cur]);
+
+			auto isCompletionValid = [&paramStr, this](size_t i)
+				{
+					return paramStr.empty() || m_completions[i].text.find(paramStr) == 0;
+				};
+
+			if (isCompletionValid(cur))
+			{
+				completions.push_back(m_completions[cur]);
+			}
 
 			for (size_t i = (cur + 1) % count; i != cur; i = (i + 1) % count)
 			{
-				completions.push_back(m_completions[i]);
+				if (isCompletionValid(i))
+				{
+					completions.push_back(m_completions[i]);
+				}
 			}
 			return completions;
 		}
@@ -284,15 +296,15 @@ namespace cli
 	public:
 		bool Create(std::ostream& out, const std::string& paramName, const std::string& partName)
 		{
-			m_part = MechSim::GetObjectRegistry().FindMechClass<MechSim::Part>(partName);
-			if (!m_part)
+			const MechSim::ObjectRegistry::PartClassInfo* info = MechSim::GetObjectRegistry().FindPartClass(partName);
+			if (!info)
 			{
 				m_name.clear();
 				out << paramName << ": received invalid part name '" << partName << "'\n";
 				return false;
 			}
 
-			m_name = partName;
+			m_name = info->m_name;
 			return true;
 		}
 
@@ -499,7 +511,13 @@ namespace cli
 			{
 				if (filter(obj))
 				{
-					completions.push_back({ obj->GetId().ToString(), obj->GetDescription() });
+					auto text = obj->GetName();
+					const auto& desc = obj->GetDescription();
+					if (!desc.empty())
+					{
+						text += ": " + obj->GetDescription();
+					}
+					completions.push_back({ obj->GetId().ToString(), text });
 				}
 			}
 			return AutoCompleter(std::move(completions));
