@@ -902,7 +902,7 @@ namespace cli
             assert(first != last);
             assert(std::distance(first, last) == 1 + sizeof...(Args));
             ObjParam<P> objParam;
-            if (!objParam.Create(out, "param", *first))
+            if (!objParam.Create(out, parmDescs[i], *first))
             {
                 return false;
             }
@@ -1034,17 +1034,15 @@ namespace cli
             // TODO: Is this always true?
             if constexpr (sizeof...(Args) > 0)
             {
-                // TODO: This current assumes the typed data in paramStr has no affect
                 const size_t zeroIndexedParam = param - 1;
                 AutoCompleter autoCompleter = ParamUtil<Args...>::CallWith<ParamAutoComplete>(zeroIndexedParam);
-
                 if (!autoCompleter.HasValues())
                 {
                     return {};
                 }
                 auto autoCompleteIndex = m_autoCompleteIndices[zeroIndexedParam] % autoCompleter.Size();
                 m_autoCompleteIndices[zeroIndexedParam] = autoCompleteIndex + 1;
-                return autoCompleter.GetAutoCompletions(autoCompleteIndex);
+                return autoCompleter.GetAutoCompletions(autoCompleteIndex, paramStr);
             }
             else
             {
