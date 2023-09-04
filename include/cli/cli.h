@@ -331,6 +331,8 @@ namespace cli
             Invalid
         };
 
+        using CleanupFn = std::function<void()>;
+
         Command() : enabled(true), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
         explicit Command(std::string _name) : name(std::move(_name)), enabled(true), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
         explicit Command(std::string _name, std::string _desc) : name(std::move(_name)), enabled(true), parent(nullptr), description(std::move(_desc)), cmds(std::make_shared<Cmds>()) {}
@@ -346,6 +348,8 @@ namespace cli
         virtual void Disable() { enabled = false; }
 
         bool HasChildren() const { return cmds && !cmds->empty(); }
+
+        virtual void Cleanup() {}
 
         void AddCommands(const Command& other)
         {
@@ -576,6 +580,13 @@ namespace cli
             return Insert(cmdName, help, parDesc, f, &F::operator());
         }
 
+        template <typename F>
+        CmdHandler Insert(const std::string& cmdName, const std::vector<std::string>& parDesc, F f, CleanupFn cleanupFunc, const std::string& help = "")
+        {
+            // dispatch to private Insert methods
+            return Insert(cmdName, help, parDesc, f, cleanupFunc, &F::operator());
+        }
+
         CmdHandler Insert(std::unique_ptr<Command>&& cmd);
 
         CmdHandler Insert(std::string&& menuName);
@@ -625,6 +636,9 @@ namespace cli
 
         template <typename F, typename R, typename ... Args>
         CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, Args...) const);
+
+        template <typename F, typename R, typename ... Args>
+        CmdHandler Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, CleanupFn cleanupFunc, R(F::*)(std::ostream& out, Args...) const);
 
         template <typename F, typename R>
         CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, const std::vector<std::string>&) const);
@@ -688,6 +702,11 @@ namespace cli
 
         void Current(Command* menu)
         {
+            if (m_testingExecution)
+            {
+                return;
+            }
+
             m_menuParamIndex = 0;
             m_current = menu;
         }
@@ -756,6 +775,7 @@ namespace cli
         detail::History history;
         bool exit{ false }; // to prevent the prompt after exit command
         bool m_silent = false;
+        bool m_testingExecution = false;
     };
 
     // ********************************************************************
@@ -981,14 +1001,21 @@ namespace cli
         VariadicFunctionCommand(const VariadicFunctionCommand&) = delete;
         VariadicFunctionCommand& operator = (const VariadicFunctionCommand&) = delete;
 
-        VariadicFunctionCommand(
-            const std::string& _name,
-            F fun,
-            std::string desc,
-            std::vector<std::string> parDesc
-        )
-            : Command(_name, std::move(desc)), func(std::move(fun)), parameterDesc(std::move(parDesc))
+        VariadicFunctionCommand(const std::string& _name,
+                                F func,
+                                CleanupFn cleanupFunc,
+                                std::string desc,
+                                std::vector<std::string> parDesc)
+            : Command(_name, std::move(desc))
+            , m_commandFunc(std::move(func))
+            , m_cleanupFunc(std::move(cleanupFunc))
+            , parameterDesc(std::move(parDesc))
         {
+        }
+
+        void Cleanup() override
+        {
+            m_cleanupFunc();
         }
 
         ValidationResult Validate(const std::vector<std::string>& cmdLine) override
@@ -1059,7 +1086,7 @@ namespace cli
             //return autoCompleter.HasValues();
         }
 
-        bool Exec(const std::vector< std::string >& cmdLine, CliSession& session) override
+        bool Exec(const std::vector<std::string>& cmdLine, CliSession& session) override
         {
             if (!IsEnabled()) return false;
             const std::size_t paramSize = sizeof...(Args);
@@ -1073,7 +1100,7 @@ namespace cli
                 bool success = false;
                 try
                 {
-                    auto g = [&](auto ... pars){ func( session.OutStream(), pars... ); };
+                    auto g = [&](auto ... pars){ m_commandFunc( session.OutStream(), pars... ); };
                     success = Select<Args...>::Exec(session.OutStream(), g, std::next(cmdLine.begin()), cmdLine.end(),
                         parameterDesc, 0);
                 }
@@ -1106,7 +1133,8 @@ namespace cli
         size_t GetParamCount() const override { return 1 + sizeof...(Args); }
 
     private:
-        const F func;
+        const F m_commandFunc;
+        CleanupFn m_cleanupFunc;
         const std::vector<std::string> parameterDesc;
 
         std::array<size_t, sizeof...(Args)> m_autoCompleteIndices = { 0 };
@@ -1187,7 +1215,14 @@ namespace cli
     CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, Args...) const)
     {
         assert(parDesc.size() == 0 || parDesc.size() == sizeof...(Args));
-        return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, help, parDesc));
+        return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, [](){}, help, parDesc));
+    }
+
+    template <typename F, typename R, typename ... Args>
+    CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, CleanupFn cleanupFunc, R(F::*)(std::ostream& out, Args...) const)
+    {
+        assert(parDesc.size() == 0 || parDesc.size() == sizeof...(Args));
+        return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, cleanupFunc, help, parDesc));
     }
 
     template <typename F, typename R>

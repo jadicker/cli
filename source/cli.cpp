@@ -46,6 +46,7 @@ CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
         [this](std::ostream&) { Help(); },
         "This help message"
     );
+
     globalScopeMenu->Insert(
         "exit",
         [this](std::ostream&) { Exit(); },
@@ -109,9 +110,9 @@ bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCm
         {
             if (result.first.empty())
             {
-                OutStream() << Style::Red() << "Command " << reset
-                            << "'" << Style::Command() << strs[0] << reset
-                            << "' not found.\n";
+                OutStream() << Style::Error("Command '")
+                            << Style::Command() << strs[0] << reset
+                            << Style::Error("' not found.") << std::endl;
             }
             else if (result.first.size() == 1)
             {
@@ -233,6 +234,7 @@ void CliSession::Help() const
 
 void CliSession::Exit()
 {
+    m_current->Cleanup();
     m_current = m_current->GetParent();
     if (m_current)
     {
@@ -343,6 +345,8 @@ CliSession::CompletionResults CliSession::GetCompletionsImpl(Command* command,
             params.begin() + paramOffset + commands[i].m_paramsFound);
         paramOffset += cmd.GetParamCount();
 
+        m_testingExecution = true;
+        OnScopeExit onScopeExit([this]() { m_testingExecution = false; });
         if (!cmd.Exec(localParams, *this))
         {
             valid = false;
@@ -358,11 +362,6 @@ CliSession::CompletionResults CliSession::GetCompletionsImpl(Command* command,
     {
         results = commands.back().m_command.get().GetParamCompletion(param >= params.size() ? "" : params[param],
             (param - paramOffset));
-    }
-
-    for (size_t i = 0; i < exitsRequired; ++i)
-    {
-        Exit();
     }
 
     if (!valid)

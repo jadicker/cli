@@ -402,7 +402,7 @@ namespace cli
 		static AutoCompleter::Completions GetCompletions()
 		{
 			AutoCompleter::Completions results;
-			const auto& plugs = MechSim::GetMech().GetReactor()->GetPlugs();
+			const auto& plugs = MechSim::GetMech()->GetReactor()->GetPlugs();
 			for (size_t i = 0; i < plugs.size(); ++i)
 			{
 				std::stringstream str;
@@ -415,7 +415,7 @@ namespace cli
 	protected:
 		bool Validate(size_t id) const override
 		{
-			return id < MechSim::GetMech().GetReactor()->ConnectionCount;
+			return id < MechSim::GetMech()->GetReactor()->ConnectionCount;
 		}
 	};
 
@@ -425,7 +425,7 @@ namespace cli
 		static AutoCompleter::Completions GetCompletions()
 		{
 			AutoCompleter::Completions results;
-			const auto& plugs = MechSim::GetMech().GetReactor()->GetPlugs();
+			const auto& plugs = MechSim::GetMech()->GetReactor()->GetPlugs();
 			for (size_t i = 0; i < plugs.size(); ++i)
 			{
 				if (!plugs[i].m_handle)
@@ -505,7 +505,10 @@ namespace cli
 		{
 			AutoCompleter::Completions completions;
 			using ObjectType = typename ObjParam<T>::type;
-			const auto& objects = MechSim::GetAllObjects<ObjectType>();
+
+			const auto* mech = MechSim::GetMech();
+			const auto& objects = !mech ? MechSim::GetAllObjects<ObjectType>() :
+				MechSim::ObjectRegistry::GetInstance().GetAllObjects<ObjectType>(mech->GetId());
 			auto filter = FilterFnObj::Get();
 			for (const auto* obj : objects)
 			{
