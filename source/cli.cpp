@@ -207,12 +207,12 @@ size_t CliSession::PromptImpl()
     for (auto iter = commands.rbegin(); iter != commands.rend(); ++iter)
     {
         // More interesting symbols that work ○•⁃◘◙π
-        prompt += u8">" + (*iter)->GetPromptDisplay();
+        prompt += U8(">") + (*iter)->GetPromptDisplay();
     }
 
     // TODO: To have unicode characters in the prompt, all substring work in terminal.h
     //       will have to be fixed
-    //std::string suffix = u8"  ╰╴>  ";
+    //std::string suffix = U8("  ╰╴>  ");
     std::string suffix = "  \\-> ";
     // Now that it's utf8, size() won't give us chars
     size_t suffixChars = 6;
