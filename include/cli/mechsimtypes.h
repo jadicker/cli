@@ -300,7 +300,7 @@ namespace cli
 			if (!info)
 			{
 				m_name.clear();
-				out << paramName << ": received invalid part name '" << partName << "'\n";
+				out << paramName << ": received invalid part name '" << partName << "'" << std::endl;
 				return false;
 			}
 
@@ -314,6 +314,48 @@ namespace cli
 		// Part doesn't actually have the class name...
 		std::string m_name;
 		const MechSim::Part* m_part;
+	};
+
+	class PartGUID
+	{
+	public:
+		bool Create(std::ostream& out, const std::string& paramName, const std::string& partNameOrObjectId)
+		{
+			m_input = partNameOrObjectId;
+
+			auto& reg = MechSim::GetObjectRegistry();
+			const MechSim::ObjectRegistry::PartClassInfo* info = reg.FindPartClass(partNameOrObjectId);
+			if (info)
+			{
+				m_partInfo = info->m_partInfo;
+				return true;
+			}
+
+			const auto objectId = MechSim::ObjectId::FromString(partNameOrObjectId);
+			if (auto part = dynamic_cast<const MechSim::Part*>(reg.Get(objectId)))
+			{
+				const auto* classInfo = reg.GetPartClassInfo(part->GetClass());
+				if (!classInfo)
+				{
+					out << "No class info found for " << objectId << ", for part name '"
+						<< part->GetName() << "'!" << std::endl;
+					return false;
+				}
+
+				m_partInfo = classInfo->m_partInfo;
+				return true;
+			}
+
+			out << paramName << ": received invalid part name/object id '" << partNameOrObjectId << "'" << std::endl;
+			return false;
+		}
+
+		const MechSim::PartInfo* GetPartInfo() const { return m_partInfo; }
+		const std::string& GetInputParam() const { return m_input; }
+
+	private:
+		const MechSim::PartInfo* m_partInfo = nullptr;
+		std::string m_input;
 	};
 
 	class Id
@@ -602,6 +644,7 @@ namespace cli
 	DEFINE_BASIC_FROM_STRING(ReactorLine);
 	DEFINE_BASIC_FROM_STRING(ValidReactorLine);
 	DEFINE_BASIC_FROM_STRING(PartName);
+	DEFINE_BASIC_FROM_STRING(PartGUID);
 	DEFINE_BASIC_FROM_STRING(Joystick);
 	DEFINE_BASIC_FROM_STRING(Axis);
 

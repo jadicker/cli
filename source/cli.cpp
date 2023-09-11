@@ -137,6 +137,28 @@ bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCm
             {
                 m_current = currentCommand;
             }
+
+            size_t usedParams = 0;
+            const auto& cmdLine = result.first;
+            for (const auto* cmd : result.first)
+            {
+                usedParams += cmd->GetParamCount();
+            }
+
+            if (strs.size() > usedParams)
+            {
+                OutStream() << Style::Error("Couldn't find command '" + strs[usedParams] + "'.")
+                    << "  Discarding remainder of command line: '";
+                for (size_t i = usedParams; i < strs.size(); ++i)
+                {
+                    OutStream() << strs[i];
+                    if (i < strs.size() - 1)
+                    {
+                        OutStream() << " ";
+                    }
+                }
+                OutStream() << "'." << std::endl;
+            }
         }
 
         return result.second == Command::ScanResultAction::Executed;

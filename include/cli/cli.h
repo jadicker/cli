@@ -476,14 +476,17 @@ namespace cli
             if (paramCount == GetParamCount() && nextParam < params.size() && cmds)
             {
                 // See if there are child commands
-                for (auto& cmd : *cmds)
+                if (!cmds->empty())
                 {
-                    auto results = cmd->GetCommandsImpl(params, nextParam);
-                    if (!results.empty())
+                    for (auto& cmd : *cmds)
                     {
-                        commands.insert(commands.end(), results.begin(), results.end());
-                        // Command names should be unique
-                        break;
+                        auto results = cmd->GetCommandsImpl(params, nextParam);
+                        if (!results.empty())
+                        {
+                            commands.insert(commands.end(), results.begin(), results.end());
+                            // Command names should be unique
+                            break;
+                        }
                     }
                 }
             }
@@ -1086,22 +1089,22 @@ namespace cli
             //return autoCompleter.HasValues();
         }
 
-        bool Exec(const std::vector<std::string>& cmdLine, CliSession& session) override
+        bool Exec(const std::vector<std::string>& cmds, CliSession& session) override
         {
             if (!IsEnabled()) return false;
             const std::size_t paramSize = sizeof...(Args);
-            if (cmdLine.size() != paramSize + 1)
+            if (cmds.size() != paramSize + 1)
             {
                 return false;
             }
 
-            if (Name() == cmdLine[0])
+            if (Name() == cmds[0])
             {
                 bool success = false;
                 try
                 {
                     auto g = [&](auto ... pars){ m_commandFunc( session.OutStream(), pars... ); };
-                    success = Select<Args...>::Exec(session.OutStream(), g, std::next(cmdLine.begin()), cmdLine.end(),
+                    success = Select<Args...>::Exec(session.OutStream(), g, std::next(cmds.begin()), cmds.end(),
                         parameterDesc, 0);
                 }
                 catch (std::bad_cast&)
@@ -1153,13 +1156,13 @@ namespace cli
             const std::string& _name,
             F fun,
             std::string desc,
-            std::vector<std::string> parDesc
+            std::vector<std::string> parDesc = {}
         )
             : Command(_name), func(std::move(fun)), description(std::move(desc)), parameterDesc(std::move(parDesc))
         {
         }
 
-        ValidationResult Validate(const std::vector<std::string>& cmdLine, std::string& error) override
+        ValidationResult Validate(const std::vector<std::string>& cmdLine) override
         {
             if (!IsEnabled()) return ValidationResult::NoMatch;
             
