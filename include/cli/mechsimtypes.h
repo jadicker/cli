@@ -7,11 +7,10 @@
 #include <limits>
 #include <type_traits>
 
-#include "MechSim/Central/Central.h"
 #include "MechSim/Central/Mech.h"
 #include "MechSim/Central/Modules.h"
+#include "MechSim/Controller/Connectable.h"
 #include "MechSim/Game/Game.h"
-#include "MechSim/Misc/ObjectUtils.h"
 #include "MechSim/Misc/VectorHandle.h"
 #include "MechSim/Instrument/Instrument.h"
 
@@ -483,6 +482,46 @@ namespace cli
 		}
 	};
 
+	class ConnectorPort : public Id
+	{
+	public:
+		static AutoCompleter::Completions GetCompletions()
+		{
+			AutoCompleter::Completions results;
+			if (auto connectable = GetActiveConnectable())
+			{
+				connectable->VisitAllConnectors([&results](const MechSim::Connector* connector) -> bool
+					{
+						results.push_back({ std::to_string(results.size()), connector->GetDescription() });
+						return true;
+					});
+			}
+			return results;
+		}
+
+	protected:
+		bool Validate(size_t id) const override
+		{
+			if (auto connectable = GetActiveConnectable())
+			{
+				return id < connectable->GetPortCount();
+			}
+
+			return false;
+		}
+
+		static const MechSim::Connectable* GetActiveConnectable()
+		{
+			auto& game = MechSim::Game::GetInstance();
+			if (game.m_menuObjects.empty())
+			{
+				return nullptr;
+			}
+
+			return dynamic_cast<const MechSim::Connectable*>(game.m_menuObjects.back());
+		}
+	};
+
 	// Not sure of a better way to do this yet
 #define DEFINE_CLAMPED_FLOAT(name /* class name */, min /* float */, max /* float */) \
 	class name \
@@ -647,6 +686,7 @@ namespace cli
 	DEFINE_BASIC_FROM_STRING(PartGUID);
 	DEFINE_BASIC_FROM_STRING(Joystick);
 	DEFINE_BASIC_FROM_STRING(Axis);
+	DEFINE_BASIC_FROM_STRING(ConnectorPort);
 
 	// Specially defined
 	NAME_BASIC_TYPE(Powerable);
