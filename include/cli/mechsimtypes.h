@@ -176,15 +176,16 @@ namespace cli
 			}
 		};
 
-		struct Powerable
+		template <typename ObjInterface>
+		struct IsA
 		{
 			static FilterFn Get()
 			{
 				return [](const MechSim::Object* obj)
-				{
-					const auto* powerable = dynamic_cast<const MechSim::Powerable*>(obj);
-					return static_cast<bool>(powerable);
-				};
+					{
+						const auto* powerable = dynamic_cast<const ObjInterface*>(obj);
+						return static_cast<bool>(powerable);
+					};
 			}
 		};
 
@@ -248,7 +249,7 @@ namespace cli
 				return false;
 			}
 
-			if (!filter::Get()(m_object))
+			if (!filter::Get()(GetObj()))
 			{
 				m_object = nullptr;
 				return false;
@@ -260,8 +261,17 @@ namespace cli
 		// Only call from safe contexts!
 		T& Get() { return *m_object; }
 
-		MechSim::ObjectId GetId() const { return m_object ? m_object->GetId() : MechSim::NullObjectId; }
-		MechSim::ObjectGUID GetGUID() const { return m_object->GetGUID(); }
+		MechSim::ObjectId GetId() const
+		{
+			const auto* obj = GetObj();
+			return obj ? obj->GetId() : MechSim::NullObjectId;
+		}
+
+		MechSim::ObjectGUID GetGUID() const
+		{
+			const auto* obj = GetObj();
+			return obj ? obj->GetGUID() : MechSim::ObjectGUID();
+		}
 
 		MechSim::Object* GetObj() { return dynamic_cast<MechSim::Object*>(m_object); }
 		const MechSim::Object* GetObj() const { return dynamic_cast<MechSim::Object*>(m_object); }
@@ -286,7 +296,8 @@ namespace cli
 	template <typename T>
 	using ObjParam = FilteredObjParam<T, ObjFilters::None>;
 
-	using Powerable = FilteredObjParam<MechSim::Object, ObjFilters::Powerable>;
+	using Powerable = FilteredObjParam<MechSim::Powerable, ObjFilters::IsA<MechSim::Powerable>>;
+	using Readable = FilteredObjParam<MechSim::Readable, ObjFilters::IsA<MechSim::Readable>>;
 	using Joystick = FilteredObjParam<MechSim::Joystick, ObjFilters::None>;
 	using Part = FilteredObjParam<MechSim::Part, ObjFilters::None>;
 	
@@ -588,8 +599,8 @@ namespace cli
 			using ObjectType = typename ObjParam<T>::type;
 
 			const auto* mech = MechSim::GetMech();
-			const auto& objects = !mech ? MechSim::GetAllObjects<ObjectType>() :
-				MechSim::ObjectRegistry::GetInstance().GetAllObjects<ObjectType>(mech->GetId());
+			const auto& objects = !mech ? MechSim::GetAllObjectsOfType<ObjectType>() :
+				MechSim::ObjectRegistry::GetInstance().GetAllObjectsOfType<ObjectType>(mech->GetId());
 			auto filter = FilterFnObj::Get();
 			for (const auto* obj : objects)
 			{
