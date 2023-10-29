@@ -287,8 +287,8 @@ namespace cli
 	using ObjParam = FilteredObjParam<T, ObjFilters::None>;
 
 	using Powerable = FilteredObjParam<MechSim::Object, ObjFilters::Powerable>;
-
 	using Joystick = FilteredObjParam<MechSim::Joystick, ObjFilters::None>;
+	using Part = FilteredObjParam<MechSim::Part, ObjFilters::None>;
 	
 	class PartName
 	{

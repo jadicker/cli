@@ -138,14 +138,24 @@ bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCm
                 m_current = currentCommand;
             }
 
+            bool endedInFreeCommand = false;
             size_t usedParams = 0;
             const auto& cmdLine = result.first;
             for (const auto* cmd : result.first)
             {
-                usedParams += cmd->GetParamCount();
+                // TODO: Maybe check that we only ever END with a free command (not in the middle), but
+                //       that should be the only possible way to define one.
+                auto count = cmd->GetParamCount();
+                if (count == std::numeric_limits<size_t>::max())
+                {
+                    endedInFreeCommand = true;
+                    break;
+                }
+
+                usedParams += count;
             }
 
-            if (strs.size() > usedParams)
+            if (!endedInFreeCommand && strs.size() > usedParams)
             {
                 OutStream() << Style::Error("Couldn't find command '" + strs[usedParams] + "'.")
                     << "  Discarding remainder of command line: '";
