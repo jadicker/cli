@@ -359,7 +359,7 @@ CliSession::CompletionResults CliSession::GetCompletionsImpl(Command* command,
         auto paramIndex = m_menuParamIndex;
         m_menuParamIndex = (m_menuParamIndex + 1) % completions.size();
         
-        if (paramIndex > 0)
+        if (paramIndex > 0 && paramIndex <= completions.size())
         {
             completions.insert(completions.end(), completions.begin(), completions.begin() + paramIndex);
             completions.erase(completions.begin(), completions.begin() + paramIndex);
