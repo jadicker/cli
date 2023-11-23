@@ -47,6 +47,7 @@
 #include <utility>
 
 #include "mechsimtypes.h"
+#include "mechsimtostring.h"
 
 class ConsoleTestRunner;
 
@@ -398,7 +399,7 @@ namespace cli
             BadParams
         };
 
-        using ScanResult = std::pair<std::vector<const Command*>, ScanResultAction>;
+        using ScanResult = std::pair<std::vector<Command*>, ScanResultAction>;
         ScanResult ScanCmds(const std::vector<std::string>& cmdLine, CliSession& session);
 
         std::string Prompt() const
@@ -442,6 +443,14 @@ namespace cli
         {
             std::reference_wrapper<Command> m_command;
             size_t m_paramsFound;
+
+            // TODO: Pack parameter info into here that can be used to describe them further.
+            // Maybe instead of having ParamAutoComplete template specializations as they exist today,
+            // there should be objects that get constructed in the specialization case but otherwise can
+            // be used here.  Something like "ParameterDescription"?  Then they can overload operator<<
+            // for printing and have whatever CONCRETE data is needed to pack into a struct like this one
+            // and remain understandable plus allow for traditional use of containers to pass around
+            // rather than variadic templates.
         };
 
         std::vector<CommandParams> GetCommands(std::vector<std::string> params, size_t currentParam = 0) const
@@ -714,6 +723,13 @@ namespace cli
             m_current = menu;
         }
 
+        void SetTop()
+        {
+            m_top = m_current;
+        }
+
+        void Pop();
+
         std::ostream& OutStream();
 
         void Help() const;
@@ -760,7 +776,10 @@ namespace cli
 
         Cli& cli;
         std::shared_ptr<cli::OutStream> coutPtr;
-        Command* m_current;
+        Command* m_current = nullptr;
+
+        // Marker that can be set, used for popping scopes
+        Command* m_top = nullptr;
         
         // Param index to use for command matching (rather than param matching)
         AutoCompleter::Completions m_previousCompletions;
@@ -876,15 +895,10 @@ namespace cli
     class ParamUtil
     {
     public:
-        static AutoCompleter GetAutoCompleter(size_t i)
-        {
-            return { {} };
-        }
-
         template <template <typename T> class Action>
-        static auto CallWith(size_t i)
+        static auto CallWith(size_t i, const std::string& token)
         {
-            return Action<void>::Get();
+            return Action<void>::Get(token);
         }
     };
 
@@ -893,25 +907,16 @@ namespace cli
     class ParamUtil<ArgCar, ArgCdr...>
     {
     public:
-        static AutoCompleter GetAutoCompleter(size_t i)
-        {
-            if (i > 0)
-            {
-                return ParamUtil<ArgCdr...>::GetAutoCompleter(i - 1);
-            }
-
-            return ParamAutoComplete<ArgCar>::Get();
-        }
-
+        // token is the current command line token
         template <template <typename T> class Action>
-        static auto CallWith(size_t i)
+        static auto CallWith(size_t i, const std::string& token)
         {
             if (i > 0)
             {
-                return ParamUtil<ArgCdr...>::CallWith<Action>(i - 1);
+                return ParamUtil<ArgCdr...>::CallWith<Action>(i - 1, token);
             }
 
-            return Action<std::decay_t<ArgCar>>::Get();
+            return Action<std::decay_t<ArgCar>>::Get(token);
         }
     };
 
@@ -1065,7 +1070,7 @@ namespace cli
             if constexpr (sizeof...(Args) > 0)
             {
                 const size_t zeroIndexedParam = param - 1;
-                AutoCompleter autoCompleter = ParamUtil<Args...>::CallWith<ParamAutoComplete>(zeroIndexedParam);
+                AutoCompleter autoCompleter = ParamUtil<Args...>::CallWith<ParamAutoComplete>(zeroIndexedParam, paramStr);
                 if (!autoCompleter.HasValues())
                 {
                     return {};

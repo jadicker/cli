@@ -16,51 +16,6 @@
 
 namespace cli
 {
-	inline std::ostream& operator<<(std::ostream& os, MechSim::ObjectId objectId)
-	{
-		os << Style::ObjectId() << objectId.ToString(false) << " (" << GetObjectName(objectId) << ")"
-		   << reset;
-		return os;
-	}
-
-	inline std::ostream& operator<<(std::ostream& os, const MechSim::Object& object)
-	{
-		os << Style::Object() << object.GetClass() << reset << " " << object.GetId() << reset;
-		return os;
-	}
-
-	inline std::ostream& operator<<(std::ostream& os, MechSim::ObjectHandleAny object)
-	{
-		os << *object.Get<MechSim::Object>();
-		return os;
-	}
-
-	inline std::ostream& operator<<(std::ostream& os, const MechSim::Mech& mech)
-	{
-		os << Style::Mech() << mech.GetName() << reset << " " << mech.GetId() << reset;
-		return os;
-	}
-
-	template <typename T, typename IndexType>
-	inline std::ostream& operator<<(std::ostream& os, const Util::VectorHandle<T, IndexType>& vectorHandle)
-	{
-		os << vectorHandle.GetIndex() << reset;
-		return os;
-	}
-
-	inline std::ostream& operator<<(std::ostream& os, const MechSim::Object* object)
-	{
-		if (!object)
-		{
-			os << Style::Object() << "Invalid" << reset;	
-		}
-		else
-		{
-			os << *object;
-		}
-		return os;
-	}
-
 	inline std::string ParamObjectId(std::string&& paramName)
 	{
 		std::stringstream str;
@@ -165,65 +120,56 @@ namespace cli
 
 	namespace ObjFilters
 	{
-		// Return true if this obj passes the filter
-		using FilterFn = std::function<bool(const MechSim::Object* obj)>;
-
+		// All filters return true if obj passes the filter
 		struct None
 		{
-			static FilterFn Get()
+			template <typename T>
+			static bool Get(const T*)
 			{
-				return [](const MechSim::Object*) { return true; };
+				return true;
 			}
 		};
 
 		template <typename ObjInterface>
 		struct IsA
 		{
-			static FilterFn Get()
+			template <typename T>
+			static bool Get(const T* obj)
 			{
-				return [](const MechSim::Object* obj)
-					{
-						const auto* powerable = dynamic_cast<const ObjInterface*>(obj);
-						return static_cast<bool>(powerable);
-					};
+				const auto* powerable = dynamic_cast<const ObjInterface*>(obj);
+				return static_cast<bool>(powerable);
 			}
 		};
 
 		struct MountableByController
 		{
-			static FilterFn Get()
+			template <typename T>
+			static bool Get(const T* obj)
 			{
-				return [](const MechSim::Object* obj)
+				if (!MechSim::Game::GetInstance().m_controllerToMount)
 				{
-					if (!MechSim::Game::GetInstance().m_controllerToMount)
-					{
-						return false;
-					}
-					return MechSim::Game::GetInstance().m_controllerToMount->CanControl(obj);
-				};
+					return false;
+				}
+				return MechSim::Game::GetInstance().m_controllerToMount->CanControl(obj);
 			}
 		};
 
 		struct NotInstalled
 		{
-			static FilterFn Get()
+			template <typename T>
+			static bool Get(const T* obj)
 			{
-				return [](const MechSim::Object* obj)
-				{
-					return obj->GetId().GetRootId() == MechSim::WorldObjectId
-						|| obj->GetId().GetRootId() == MechSim::AnonObjectId;
-				};
+				return obj->GetId().GetRootId() == MechSim::WorldObjectId
+					|| obj->GetId().GetRootId() == MechSim::AnonObjectId;
 			}
 		};
 
 		struct IsMech
 		{
-			static FilterFn Get()
+			template <typename T>
+			static bool Get(const T* obj)
 			{
-				return [](const MechSim::Object* obj)
-				{
-					return obj->GetId().GetLeaf().second == 0;
-				};
+				return obj->GetId().GetLeaf().second == 0;
 			}
 		};
 	}
@@ -249,7 +195,7 @@ namespace cli
 				return false;
 			}
 
-			if (!filter::Get()(GetObj()))
+			if (!filter::Get<T>(m_object))
 			{
 				m_object = nullptr;
 				return false;
@@ -404,11 +350,13 @@ namespace cli
 			const auto& slots = MechSim::Game::GetInstance().m_activeModule->DescribeSlots();
 			size_t id = 0;
 			for (const std::string& slot : slots)
-			{
-				results.push_back({ std::to_string(id++), slot });
+			{	
+				results.push_back({ std::to_string(id), slot });
+				++id;
 			}
 			return results;
 		}
+
 	protected:
 		bool Validate(size_t id) const override
 		{
@@ -567,7 +515,7 @@ namespace cli
 	template <typename T, typename Enable = void>
 	struct ParamAutoComplete
 	{
-		static AutoCompleter Get()
+		static AutoCompleter Get(const std::string& token)
 		{
 			return AutoCompleter({});
 		}
@@ -578,7 +526,7 @@ namespace cli
 							 std::enable_if_t<std::is_base_of<MechSim::Object, std::decay_t<T>>::value>
 							>
 	{
-		static AutoCompleter Get()
+		static AutoCompleter Get(const std::string& token)
 		{
 			AutoCompleter::Completions completions;
 			const auto& objects = MechSim::GetAllObjects<T>();
@@ -593,19 +541,21 @@ namespace cli
 	template <typename T, typename FilterFnObj>
 	struct ParamAutoComplete<FilteredObjParam<T, FilterFnObj>>
 	{
-		static AutoCompleter Get()
+		static AutoCompleter Get(const std::string& token)
 		{
 			AutoCompleter::Completions completions;
 			using ObjectType = typename ObjParam<T>::type;
 
 			const auto* mech = MechSim::GetMech();
-			const auto& objects = !mech ? MechSim::GetAllObjectsOfType<ObjectType>() :
-				MechSim::ObjectRegistry::GetInstance().GetAllObjectsOfType<ObjectType>(mech->GetId());
-			auto filter = FilterFnObj::Get();
-			for (const auto* obj : objects)
+			auto& reg = MechSim::ObjectRegistry::GetInstance();
+			const auto& objects = !mech ?
+				reg.GetAllObjectsOfTypeWithObject<ObjectType>(MechSim::NullObjectId) :
+				reg.GetAllObjectsOfTypeWithObject<ObjectType>(mech->GetId());
+			for (const auto& pair : objects)
 			{
-				if (filter(obj))
+				if (FilterFnObj::Get(pair.first))
 				{
+					const MechSim::Object* obj = pair.second;
 					auto text = obj->GetName();
 					const auto& desc = obj->GetDescription();
 					if (!desc.empty())
@@ -624,7 +574,7 @@ namespace cli
 							 std::enable_if_t<std::is_base_of<Id, std::decay_t<T>>::value>
 							>
 	{
-		static AutoCompleter Get()
+		static AutoCompleter Get(const std::string& token)
 		{
 			AutoCompleter::Completions completions = T::GetCompletions();
 			return AutoCompleter(std::move(completions));
@@ -634,10 +584,10 @@ namespace cli
 	template <>
 	struct ParamAutoComplete<PartName>
 	{
-		static AutoCompleter Get()
+		static AutoCompleter Get(const std::string& token)
 		{
 			AutoCompleter::Completions completions;
-			const auto& rawCompletions = MechSim::GetObjectRegistry().GetAutoCompletions("");
+			const auto& rawCompletions = MechSim::GetObjectRegistry().GetAutoCompletions(token);
 			for (const auto& completion : rawCompletions)
 			{
 				completions.push_back({ completion.first, completion.second->GetName() });
@@ -662,7 +612,6 @@ namespace cli
 				return result;
 			}
 		};
-
 	}
 
 	// TODO: Also a dep in cli.h right now, should be in another header

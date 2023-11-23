@@ -133,8 +133,17 @@ bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCm
             // There's only 2 cases in which we don't go back to our previous menu:
             //  - if the leaf command that executed has children, meaning it's a submenu.
             //  - exit was called
-            if (!result.first.back()->HasChildren() && result.first.back() != m_exitCommand)
+            auto& commandsExecuted = result.first;
+            if (!commandsExecuted.back()->HasChildren() && commandsExecuted.back() != m_exitCommand)
             {
+                for (auto iter = commandsExecuted.rbegin(); iter != commandsExecuted.rend(); ++iter)
+                {
+                    if (*iter == currentCommand)
+                    {
+                        break;
+                    }
+                    (*iter)->Cleanup();
+                }
                 m_current = currentCommand;
             }
 
@@ -420,6 +429,23 @@ CliSession::CompletionResults CliSession::GetCompletions(std::string currentLine
         }
     }
     return completions;
+}
+
+void CliSession::Pop()
+{
+    if (!m_top || !m_current)
+    {
+        return;
+    }
+
+    Command* cur = m_current;
+    while (cur != m_top && cur != nullptr)
+    {
+        cur->Cleanup();
+        cur = cur->GetParent();
+    }
+    m_top = nullptr;
+    m_current = m_top;
 }
 
 detail::AutoCompletion CliSession::GetCurrentCommandCompletion(const std::string& line) const
