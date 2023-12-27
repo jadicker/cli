@@ -304,6 +304,26 @@ struct FromString<long double>
     }
 };
 
+// TODO: There is an issue with the setup with taking this in as a container
+template <> struct FromString<std::vector<float>> {
+    static std::vector<float> get(std::ostream& out, const std::string& paramName, const std::string& s)
+    {
+        constexpr const char delim = ',';
+        std::vector<float> result;
+        size_t lastDelim = 0;
+        for (size_t i = 0; i < s.size(); ++i)
+        {
+            if (s[i] == delim)
+            {
+                const auto& subStr = s.substr(lastDelim, i - lastDelim);
+                result.push_back(FromString<float>::get(out, paramName, subStr));
+            }
+        }
+
+        return result;
+    }
+};
+
     } // namespace detail
 
 } // namespace cli

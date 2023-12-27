@@ -130,17 +130,6 @@ namespace cli
 			}
 		};
 
-		template <typename ObjInterface>
-		struct IsA
-		{
-			template <typename T>
-			static bool Get(const T* obj)
-			{
-				const auto* powerable = dynamic_cast<const ObjInterface*>(obj);
-				return static_cast<bool>(powerable);
-			}
-		};
-
 		struct MountableByController
 		{
 			template <typename T>
@@ -242,10 +231,10 @@ namespace cli
 	template <typename T>
 	using ObjParam = FilteredObjParam<T, ObjFilters::None>;
 
-	using Powerable = FilteredObjParam<MechSim::Powerable, ObjFilters::IsA<MechSim::Powerable>>;
-	using Readable = FilteredObjParam<MechSim::Readable, ObjFilters::IsA<MechSim::Readable>>;
-	using Joystick = FilteredObjParam<MechSim::Joystick, ObjFilters::None>;
-	using Part = FilteredObjParam<MechSim::Part, ObjFilters::None>;
+	using Powerable = ObjParam<MechSim::Powerable>;
+	using Readable = ObjParam<MechSim::Readable>;
+	using Joystick = ObjParam<MechSim::Joystick>;
+	using Part = ObjParam<MechSim::Part>;
 	
 	class PartName
 	{
@@ -481,6 +470,58 @@ namespace cli
 		}
 	};
 
+	// Can be an index or a string of chars in {x: 0, y: 1, z: 2, w: 3}
+	class InputAxisIds
+	{
+	public:
+		InputAxisIds() = default;
+
+		const std::vector<int>& GetAxes() const { return m_ids; }
+
+		bool Create(std::ostream& out, const std::string& paramName, const std::string& idStr)
+		{
+			auto index = MechSim::ReadInt(idStr);
+			if (index)
+			{
+				if (*index < 0 || *index > 3)
+				{
+					out << Style::Error(paramName + ": received invalid input axis, must be 0,1,2, or 3.  Got ") << idStr << "\n";
+					return false;
+				}
+
+				m_ids.push_back(*index);
+				return true;
+			}
+
+			auto pushId = [this](int id)
+				{
+					if (std::find(m_ids.begin(), m_ids.end(), id) == m_ids.end())
+					{
+						m_ids.push_back(id);
+					}
+				};
+
+			for (const char c : idStr)
+			{
+				if (c == 'x') { pushId(0); }
+				else if (c == 'y') { pushId(1); }
+				else if (c == 'z') { pushId(2); }
+				else if (c == 'w') { pushId(3); }
+				else
+				{
+					out << Style::Error(paramName + ": received invalid input axis name ") << c << "\n";
+					m_ids.clear();
+					return false;
+				}
+			}
+
+			return !m_ids.empty();
+		}
+
+	private:
+		std::vector<int> m_ids;
+	};
+
 	// Not sure of a better way to do this yet
 #define DEFINE_CLAMPED_FLOAT(name /* class name */, min /* float */, max /* float */) \
 	class name \
@@ -508,6 +549,7 @@ namespace cli
 	};
 
 	DEFINE_CLAMPED_FLOAT(Axis, -1.0f, 1.0f);
+	DEFINE_CLAMPED_FLOAT(TimelineSeconds, 0.0f, 30.0f);
 
 	template <typename T, typename Enable>
 	struct ParamAutoComplete;
@@ -544,13 +586,12 @@ namespace cli
 		static AutoCompleter Get(const std::string& token)
 		{
 			AutoCompleter::Completions completions;
-			using ObjectType = typename ObjParam<T>::type;
 
 			const auto* mech = MechSim::GetMech();
 			auto& reg = MechSim::ObjectRegistry::GetInstance();
 			const auto& objects = !mech ?
-				reg.GetAllObjectsOfTypeWithObject<ObjectType>(MechSim::NullObjectId) :
-				reg.GetAllObjectsOfTypeWithObject<ObjectType>(mech->GetId());
+				reg.GetAllObjectsOfTypeWithObject<T>(MechSim::NullObjectId) :
+				reg.GetAllObjectsOfTypeWithObject<T>(mech->GetId());
 			for (const auto& pair : objects)
 			{
 				if (FilterFnObj::Get(pair.first))
@@ -594,6 +635,21 @@ namespace cli
 			}
 			// TODO: Pass param string to Get() to filter
 			return AutoCompleter(std::move(completions));
+		}
+	};
+
+	template <>
+	struct ParamAutoComplete<InputAxisIds>
+	{
+		static AutoCompleter Get(const std::string& token)
+		{
+			// TODO: Would be amazing to have auto-complete on the actual instrument, but could be hard
+			return AutoCompleter(AutoCompleter::Completions(
+				{
+					{ "0", "x axis" }, 
+					{ "1", "y axis" },
+					{ "2", "z axis" },
+				}));
 		}
 	};
 
@@ -646,7 +702,9 @@ namespace cli
 	DEFINE_BASIC_FROM_STRING(PartGUID);
 	DEFINE_BASIC_FROM_STRING(Joystick);
 	DEFINE_BASIC_FROM_STRING(Axis);
+	DEFINE_BASIC_FROM_STRING(TimelineSeconds);
 	DEFINE_BASIC_FROM_STRING(ConnectorPort);
+	DEFINE_BASIC_FROM_STRING(InputAxisIds);
 
 	// Specially defined
 	NAME_BASIC_TYPE(Powerable);

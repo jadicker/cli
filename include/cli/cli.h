@@ -414,8 +414,6 @@ namespace cli
             if (!IsEnabled()) return;
             for (const auto& cmd : *cmds)
                 cmd->Help(out);
-            if (parent != nullptr)
-                parent->Help(out);
         }
 
         virtual void Help(std::ostream& out) const
@@ -1129,13 +1127,13 @@ namespace cli
         void Help(std::ostream& out) const override
         {
             if (!IsEnabled()) return;
-            out << "Command: " << Style::Command() << Name() << reset << " (";
+            out << Style::Command() << Name() << reset << " (";
             if (parameterDesc.empty())
                 PrintDesc<Args...>::Dump(out);
             else
                 PrintDesc<Args...>::Dump(out, parameterDesc);
 
-            out << ")\n\t" << description << "\n";
+            out << "):\t" << description << std::endl;
         }
 
         size_t GetParamCount() const override { return 1 + sizeof...(Args); }
@@ -1222,7 +1220,9 @@ namespace cli
     template <typename F, typename R, typename ... Args>
     CmdHandler Command::Insert(const std::string& cmdName, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, Args...) const)
     {
-        assert(parDesc.size() == 0 || parDesc.size() == sizeof...(Args));
+        const bool hasDescription = parDesc.size() == 0 || parDesc.size() == sizeof...(Args);
+        // Ensure this command cmdName has all parameters described
+        assert(hasDescription);
         return Insert(std::make_unique<VariadicFunctionCommand<F, Args ...>>(cmdName, f, [](){}, help, parDesc));
     }
 

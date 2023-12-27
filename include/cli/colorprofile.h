@@ -78,7 +78,9 @@ namespace Style
 {
     using FGColor = StyleHelper<detail::rang::fg>;  
     
-    inline FGColor Command() { return FGColor(detail::rang::fg::gray, detail::rang::style::italic); }
+    extern std::string Color(unsigned char red, unsigned char green, unsigned char blue);
+    
+    inline std::string Command() { return Color(200, 200, 200); }
     inline FGColor Parameter() { return FGColor(detail::rang::fg::cyan); }
     inline FGColor ObjectId() { return FGColor(detail::rang::fg::green); }
     inline FGColor Object() { return FGColor(detail::rang::fg::cyan); }
@@ -89,8 +91,6 @@ namespace Style
     inline FGColor Red() { return FGColor(detail::rang::fg::red); }
 
     inline std::string Reset() { return "\033[0m"; }
-
-    extern std::string Color(unsigned char red, unsigned char green, unsigned char blue);
 
     inline std::string Color(const ColorHelper& helper)
     {
