@@ -26,6 +26,11 @@ namespace cli
 	template <typename T>
 	T* GetObj(std::ostream& out, const std::string& paramName, const std::string& objectIdStr)
 	{
+		if (objectIdStr.empty())
+		{
+			return nullptr;
+		}
+
 		MechSim::ObjectId objectId = MechSim::ObjectId::FromString(objectIdStr);
 		auto* object = MechSim::GetObjectRegistry().Get(objectId);
 		if (!object)
@@ -148,8 +153,18 @@ namespace cli
 			template <typename T>
 			static bool Get(const T* obj)
 			{
-				return obj->GetId().GetRootId() == MechSim::WorldObjectId
-					|| obj->GetId().GetRootId() == MechSim::AnonObjectId;
+				return obj->GetId().GetRootId() == MechSim::WorldObjectId ||
+					obj->GetId().GetRootId() == MechSim::AnonObjectId;
+			}
+		};
+
+		struct Installed
+		{
+			template <typename T>
+			static bool Get(const T* obj)
+			{
+				return MechSim::ObjectId(obj->GetId().GetRootId()) != MechSim::WorldObjectId &&
+					MechSim::ObjectId(obj->GetId().GetRootId()) != MechSim::AnonObjectId;
 			}
 		};
 
@@ -554,10 +569,11 @@ namespace cli
 	template <typename T, typename Enable>
 	struct ParamAutoComplete;
 
+	// Will wipe token if an auto-completion already happened
 	template <typename T, typename Enable = void>
 	struct ParamAutoComplete
 	{
-		static AutoCompleter Get(const std::string& token)
+		static AutoCompleter Get(std::string& token)
 		{
 			return AutoCompleter({});
 		}
@@ -568,7 +584,7 @@ namespace cli
 							 std::enable_if_t<std::is_base_of<MechSim::Object, std::decay_t<T>>::value>
 							>
 	{
-		static AutoCompleter Get(const std::string& token)
+		static AutoCompleter Get(std::string& token)
 		{
 			AutoCompleter::Completions completions;
 			const auto& objects = MechSim::GetAllObjects<T>();
@@ -583,9 +599,11 @@ namespace cli
 	template <typename T, typename FilterFnObj>
 	struct ParamAutoComplete<FilteredObjParam<T, FilterFnObj>>
 	{
-		static AutoCompleter Get(const std::string& token)
+		static AutoCompleter Get(std::string& token)
 		{
 			AutoCompleter::Completions completions;
+
+			const MechSim::ObjectId filterId = MechSim::ObjectId::FromString(token);
 
 			const auto* mech = MechSim::GetMech();
 			auto& reg = MechSim::ObjectRegistry::GetInstance();
@@ -594,18 +612,31 @@ namespace cli
 				reg.GetAllObjectsOfTypeWithObject<T>(mech->GetId());
 			for (const auto& pair : objects)
 			{
-				if (FilterFnObj::Get(pair.first))
+				if (!FilterFnObj::Get(pair.first))
 				{
-					const MechSim::Object* obj = pair.second;
-					auto text = obj->GetName();
-					const auto& desc = obj->GetDescription();
-					if (!desc.empty())
-					{
-						text += ": " + obj->GetDescription();
-					}
-					completions.push_back({ obj->GetId().ToString(), text });
+					continue;
 				}
+
+				const MechSim::Object* obj = pair.second;
+				if (filterId.IsValid() && !obj->GetId().StartsWith(filterId))
+				{
+					continue;
+				}
+
+				auto text = obj->GetName();
+				const auto& desc = obj->GetDescription();
+				if (!desc.empty())
+				{
+					text += ": " + obj->GetDescription();
+				}
+				completions.push_back({ obj->GetId().ToString(), text });
 			}
+
+			if (filterId.IsValid())
+			{
+				token.clear();
+			}
+
 			return AutoCompleter(std::move(completions));
 		}
 	};
@@ -615,7 +646,7 @@ namespace cli
 							 std::enable_if_t<std::is_base_of<Id, std::decay_t<T>>::value>
 							>
 	{
-		static AutoCompleter Get(const std::string& token)
+		static AutoCompleter Get(std::string& token)
 		{
 			AutoCompleter::Completions completions = T::GetCompletions();
 			return AutoCompleter(std::move(completions));
@@ -625,7 +656,7 @@ namespace cli
 	template <>
 	struct ParamAutoComplete<PartName>
 	{
-		static AutoCompleter Get(const std::string& token)
+		static AutoCompleter Get(std::string& token)
 		{
 			AutoCompleter::Completions completions;
 			const auto& rawCompletions = MechSim::GetObjectRegistry().GetAutoCompletions(token);
@@ -641,7 +672,7 @@ namespace cli
 	template <>
 	struct ParamAutoComplete<InputAxisIds>
 	{
-		static AutoCompleter Get(const std::string& token)
+		static AutoCompleter Get(std::string& token)
 		{
 			// TODO: Would be amazing to have auto-complete on the actual instrument, but could be hard
 			return AutoCompleter(AutoCompleter::Completions(

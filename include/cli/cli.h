@@ -894,7 +894,7 @@ namespace cli
     {
     public:
         template <template <typename T> class Action>
-        static auto CallWith(size_t i, const std::string& token)
+        static auto CallWith(size_t i, std::string& token)
         {
             return Action<void>::Get(token);
         }
@@ -907,7 +907,7 @@ namespace cli
     public:
         // token is the current command line token
         template <template <typename T> class Action>
-        static auto CallWith(size_t i, const std::string& token)
+        static auto CallWith(size_t i, std::string& token)
         {
             if (i > 0)
             {
@@ -1068,14 +1068,15 @@ namespace cli
             if constexpr (sizeof...(Args) > 0)
             {
                 const size_t zeroIndexedParam = param - 1;
-                AutoCompleter autoCompleter = ParamUtil<Args...>::CallWith<ParamAutoComplete>(zeroIndexedParam, paramStr);
+                std::string paramStrCopy = paramStr;
+                AutoCompleter autoCompleter = ParamUtil<Args...>::CallWith<ParamAutoComplete>(zeroIndexedParam, paramStrCopy);
                 if (!autoCompleter.HasValues())
                 {
                     return {};
                 }
                 auto autoCompleteIndex = m_autoCompleteIndices[zeroIndexedParam] % autoCompleter.Size();
                 m_autoCompleteIndices[zeroIndexedParam] = autoCompleteIndex + 1;
-                return autoCompleter.GetAutoCompletions(autoCompleteIndex, paramStr);
+                return autoCompleter.GetAutoCompletions(autoCompleteIndex, paramStrCopy);
             }
             else
             {
