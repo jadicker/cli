@@ -8,7 +8,7 @@ namespace cli
 {
 	inline std::ostream& operator<<(std::ostream& os, MechSim::ObjectId objectId)
 	{
-		os << Style::ObjectId() << objectId.ToString(false) << " (" << GetObjectName(objectId) << ")"
+		os << Style::ObjectId() << objectId.ToString(false) << "(" << GetObjectName(objectId) << ")"
 			<< reset;
 		return os;
 	}
@@ -48,6 +48,12 @@ namespace cli
 		{
 			os << *object;
 		}
+		return os;
+	}
+
+	inline std::ostream& operator<<(std::ostream& os, const MechSim::Agent& agent)
+	{
+		os << agent.GetName();
 		return os;
 	}
 }

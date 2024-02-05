@@ -374,7 +374,7 @@ namespace cli
 		static AutoCompleter::Completions GetCompletions()
 		{
 			AutoCompleter::Completions results;
-			const auto& allRootObjectIds = MechSim::ObjectRegistry::GetInstance().GetAllRootObjects();
+			const auto& allRootObjectIds = MechSim::ObjectRegistry::GetInstance().GetAllRootObjectIds();
 			for (const auto& mechId : allRootObjectIds)
 			{
 				results.push_back({ mechId.ToString(), "Mech description here..."});
@@ -391,7 +391,7 @@ namespace cli
 		bool Validate(size_t id) const override
 		{
 			AutoCompleter::Completions results;
-			const auto& allRootObjectIds = MechSim::ObjectRegistry::GetInstance().GetAllRootObjects();
+			const auto& allRootObjectIds = MechSim::ObjectRegistry::GetInstance().GetAllRootObjectIds();
 			MechSim::ObjectId objId = MechSim::MakeObjectId(static_cast<MechSim::ObjectIdElementType>(id));
 			auto iter = std::find_if(allRootObjectIds.begin(), allRootObjectIds.end(),
 				[objId](const auto& mechId) { return mechId == objId; });
