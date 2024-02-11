@@ -165,10 +165,10 @@ private:
                 }
             }
             case 8:
-                return std::make_pair(KeyType::backspace, c);
+                return std::make_pair(KeyType::backspace, static_cast<char>(c));
                 break;
             case 13:
-                return std::make_pair(KeyType::ret, c);
+                return std::make_pair(KeyType::ret, static_cast<char>(c));
                 break;
             default: // hopefully ascii
             {

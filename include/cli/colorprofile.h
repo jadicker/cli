@@ -68,9 +68,9 @@ struct StyleHelper
 
 struct ColorHelper
 {
-    int m_r = 255;
-    int m_g = 255;
-    int m_b = 255;
+    unsigned char m_r = 255;
+    unsigned char m_g = 255;
+    unsigned char m_b = 255;
     bool m_underline = false;
 };
 
@@ -181,7 +181,6 @@ inline std::ostream& operator<<(std::ostream& os, const Style::Error& error)
 
 inline size_t GetCharLen(const char c)
 {
-    int cplen = 1;
     if ((c & 0xf8) == 0xf0)
     {
         return 4;

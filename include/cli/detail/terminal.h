@@ -29,6 +29,8 @@
 
 #pragma once
 
+#pragma warning(disable: 4100) // unreferenced formal parameter
+
 #include <numeric>
 #include <optional>
 #include <string>
@@ -343,7 +345,7 @@ public:
     }
 
     // Returns the parameter index, 0 for the command name
-    size_t GetParamIndex(const std::string& line) const
+    size_t GetParamIndex(const std::string&) const
     {
         return GetParamInfo(m_currentLine, GetInputPosition()).index;
     }

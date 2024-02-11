@@ -114,8 +114,7 @@ private:
             case Symbol::tab:
             {
                 auto lineInfo = terminal.GetAutoCompleteLine();
-                size_t paramIndex = lineInfo.second;
-
+                
                 auto completions = session.GetCompletions(lineInfo.first, lineInfo.second);
                 if (completions.m_completions.empty())
                 {

@@ -5,6 +5,65 @@
 
 using namespace cli;
 
+Utf8StringInfo GetUtf8Info(const std::string& str)
+{
+    Utf8StringInfo info;
+    bool onExtendedChar = false;
+
+    for (size_t i = 0; i < str.size(); i++)
+    {
+        if ((0x80 & str[i]) > 0)
+        {
+            if (onExtendedChar)
+            {
+                info.extraBytes++;
+            }
+            else
+            {
+                onExtendedChar = true;
+                info.charCount++;
+            }
+
+            continue;
+        }
+        onExtendedChar = false;
+
+        info.charCount++;
+    }
+
+    return info;
+}
+
+std::string cli::Pad(const std::string& str, size_t count)
+{
+    std::string out;
+    out.reserve(count);
+    for (size_t i = 0; i < count; ++i)
+    {
+        out += str;
+    }
+    return out;
+}
+
+size_t cli::get_n_chars_from_back_utf8(const std::string& str, size_t n)
+{
+    for (int i = static_cast<int>(str.size()) - 1; i >= 0; --i)
+    {
+        if ((0x80 & str[i]) > 0)
+        {
+            continue;
+        }
+
+        --n;
+        if (n == 0)
+        {
+            return i;
+        }
+    }
+
+    return 0;
+}
+
 bool Command::Exec(const std::vector<std::string>& cmdLine, CliSession& session)
 {
     if (!IsEnabled())
@@ -13,7 +72,7 @@ bool Command::Exec(const std::vector<std::string>& cmdLine, CliSession& session)
     {
         // check also for subcommands
         std::vector<std::string > subCmdLine(cmdLine.begin() + 1, cmdLine.end());
-        for (auto& cmd : *cmds)
+        for (auto& cmd : *m_cmds)
             if (cmd->Exec(subCmdLine, session)) return true;
 
         if (HasChildren())
@@ -75,6 +134,19 @@ std::ostream& CliSession::OutStream()
 
 bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCmd, bool silentOutput)
 {
+    MechSim::ScopedLambda silence(
+        [this, silentOutput]()
+        {
+            if (silentOutput)
+            {
+                m_silent = true;
+            }
+        },
+        [this]()
+        {
+            m_silent = false;
+        });
+
     if (printCmd)
     {
         OutStream() << cmd << "\n";
@@ -121,10 +193,10 @@ bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCm
             else
             {
                 OutStream() << "Which '" << Style::Command() << strs[0] << reset << "'?  Could be:\n";
-                for (const auto& cmd : result.first)
+                for (const auto& resultCmd : result.first)
                 {
                     OutStream() << "\t";
-                    cmd->Help(OutStream());
+                    resultCmd->Help(OutStream());
                 }
             }
         }
@@ -149,12 +221,11 @@ bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCm
 
             bool endedInFreeCommand = false;
             size_t usedParams = 0;
-            const auto& cmdLine = result.first;
-            for (const auto* cmd : result.first)
+            for (const auto* resultCmd : result.first)
             {
                 // TODO: Maybe check that we only ever END with a free command (not in the middle), but
                 //       that should be the only possible way to define one.
-                auto count = cmd->GetParamCount();
+                auto count = resultCmd->GetParamCount();
                 if (count == std::numeric_limits<size_t>::max())
                 {
                     endedInFreeCommand = true;
@@ -463,17 +534,17 @@ CmdHandler Command::Insert(std::unique_ptr<Command>&& cmd)
 {
     std::shared_ptr<Command> scmd(std::move(cmd));
     scmd->parent = this;
-    CmdHandler c(scmd, cmds);
-    cmds->push_back(scmd);
+    CmdHandler c(scmd, m_cmds);
+    m_cmds->push_back(scmd);
     return c;
 }
 
 CmdHandler Command::Insert(std::string&& menuName)
 {
     std::shared_ptr<Command> smenu = std::make_shared<Command>(std::move(menuName));
-    CmdHandler c(smenu, cmds);
+    CmdHandler c(smenu, m_cmds);
     smenu->parent = this;
-    cmds->push_back(smenu);
+    m_cmds->push_back(smenu);
     return c;
 }
 

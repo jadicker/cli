@@ -199,7 +199,7 @@ namespace cli
 				return false;
 			}
 
-			if (!filter::Get<T>(m_object))
+			if (!filter::template Get<T>(m_object))
 			{
 				m_object = nullptr;
 				return false;
@@ -273,7 +273,6 @@ namespace cli
 	private:
 		// Part doesn't actually have the class name...
 		std::string m_name;
-		const MechSim::Part* m_part;
 	};
 
 	class PartGUID
@@ -410,7 +409,7 @@ namespace cli
 			for (size_t i = 0; i < plugs.size(); ++i)
 			{
 				std::stringstream str;
-				str << "Plug " << i << " (" << plugs[i].m_voltage << "V)";
+				str << "Plug " << i << " (" << plugs[i].GetVoltage() << "V)";
 				results.push_back({ std::to_string(i), str.str() });
 			}
 			return results;
@@ -432,13 +431,8 @@ namespace cli
 			const auto& plugs = MechSim::GetMech()->GetReactor()->GetPlugs();
 			for (size_t i = 0; i < plugs.size(); ++i)
 			{
-				if (!plugs[i].m_handle)
-				{
-					continue;
-				}
-
 				std::stringstream str;
-				str << "Plug " << i << " (" << plugs[i].m_voltage << "V)";
+				str << "Plug " << i << " (" << plugs[i].GetVoltage() << "V)";
 				results.push_back({ std::to_string(i), str.str() });
 			}
 			return results;
@@ -704,7 +698,7 @@ namespace cli
 	// TODO: Also a dep in cli.h right now, should be in another header
 	template <typename T> struct TypeDesc { static const char* Name() { return ""; } };
 
-#define NAME_BASIC_TYPE(typeName) template <> struct TypeDesc<##typeName##> { static const char* Name() { return #typeName; } };
+#define NAME_BASIC_TYPE(typeName) template <> struct TypeDesc< typeName > { static const char* Name() { return #typeName; } };
 
 	// TODO: Clean this up to be one template, if possible
 #define DEFINE_BASIC_FROM_STRING(typeName) \
@@ -723,7 +717,7 @@ namespace cli
 	} \
 	\
 	NAME_BASIC_TYPE(typeName);
-	
+
 	// Uses default Create path for FromString
 	DEFINE_BASIC_FROM_STRING(MechId);
 	DEFINE_BASIC_FROM_STRING(ModuleSlotId);

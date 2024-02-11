@@ -30,6 +30,8 @@
 #ifndef CLI_CLI_H
 #define CLI_CLI_H
 
+#pragma warning(disable: 4100) // unreferenced formal parameter
+
 #include <string>
 #include <vector>
 #include <memory>
@@ -57,35 +59,7 @@ struct Utf8StringInfo
     size_t extraBytes = 0;	// Bytes used by utf8 extension
 };
 
-static Utf8StringInfo GetUtf8Info(const std::string& str)
-{
-    Utf8StringInfo info;
-    bool onExtendedChar = false;
-
-    const char* c = str.c_str();
-    for (size_t i = 0; i < str.size(); i++)
-    {
-        if ((0x80 & str[i]) > 0)
-        {
-            if (onExtendedChar)
-            {
-                info.extraBytes++;
-            }
-            else
-            {
-                onExtendedChar = true;
-                info.charCount++;
-            }
-            
-            continue;
-        }
-        onExtendedChar = false;
-
-        info.charCount++;
-    }
-
-    return info;
-}
+Utf8StringInfo GetUtf8Info(const std::string& str);
 
 class OnScopeExit final
 {
@@ -137,36 +111,9 @@ namespace cli
         }
     };
 
-    static std::string Pad(const std::string& str, size_t count)
-    {
-        std::string out;
-        out.reserve(count);
-        for (size_t i = 0; i < count; ++i)
-        {
-            out += str;
-        }
-        return out;
-    }
+    std::string Pad(const std::string& str, size_t count);
 
-    static size_t get_n_chars_from_back_utf8(const std::string& str, size_t n)
-    {
-        const char* c = str.c_str();
-        for (int i = static_cast<int>(str.size()) - 1; i >= 0; --i)
-        {
-            if ((0x80 & str[i]) > 0)
-            {
-                continue;
-            }
-
-            --n;
-            if (n == 0)
-            {
-                return i;
-            }
-        }
-
-        return 0;
-    }
+    size_t get_n_chars_from_back_utf8(const std::string& str, size_t n);
 
     // ********************************************************************
 
@@ -334,9 +281,29 @@ namespace cli
 
         using CleanupFn = std::function<void()>;
 
-        Command() : enabled(true), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
-        explicit Command(std::string _name) : name(std::move(_name)), enabled(true), parent(nullptr), description(), cmds(std::make_shared<Cmds>()) {}
-        explicit Command(std::string _name, std::string _desc) : name(std::move(_name)), enabled(true), parent(nullptr), description(std::move(_desc)), cmds(std::make_shared<Cmds>()) {}
+        Command()
+            : m_enabled(true)
+            , parent(nullptr)
+            , description()
+            , m_cmds(std::make_shared<Cmds>())
+        {}
+        
+        explicit Command(std::string _name)
+            : m_name(std::move(_name))
+            , m_enabled(true)
+            , parent(nullptr)
+            , description()
+            , m_cmds(std::make_shared<Cmds>()) 
+        {}
+        
+        explicit Command(std::string _name, std::string _desc) 
+            : m_name(std::move(_name))
+            , m_enabled(true)
+            , parent(nullptr)
+            , description(std::move(_desc))
+            , m_cmds(std::make_shared<Cmds>()) 
+        {}
+
         virtual ~Command() noexcept = default;
 
         // disable copy and move semantics
@@ -345,30 +312,29 @@ namespace cli
         Command& operator=(const Command&) = delete;
         Command& operator=(Command&&) = delete;
 
-        virtual void Enable() { enabled = true; }
-        virtual void Disable() { enabled = false; }
+        virtual void Enable() { m_enabled = true; }
+        virtual void Disable() { m_enabled = false; }
 
-        bool HasChildren() const { return cmds && !cmds->empty(); }
+        bool HasChildren() const { return m_cmds && !m_cmds->empty(); }
 
         virtual void Cleanup() {}
 
         void AddCommands(const Command& other)
         {
-            assert(other.cmds);
-            const auto& otherCmds = *other.cmds;
-            std::copy(otherCmds.begin(), otherCmds.end(), cmds->end());
+            assert(other.m_cmds);
+            const auto& otherCmds = *other.m_cmds;
+            std::copy(otherCmds.begin(), otherCmds.end(), m_cmds->end());
         }
 
         void TransferRootCommands(Command& other)
         {
-            assert(other.cmds && cmds);
-            auto& otherCmds = *other.cmds;
+            assert(other.m_cmds && m_cmds);
+            auto& otherCmds = *other.m_cmds;
             for (auto iter = otherCmds.begin(); iter != otherCmds.end(); ++iter)
             {
                 if (dynamic_cast<const Command*>(iter->get()))
                 {
-                    cmds->push_back(*iter);
-                    //iter = otherCmds.erase(iter);
+                    m_cmds->push_back(*iter);
                 }
             }
         }
@@ -386,7 +352,7 @@ namespace cli
         void ResetAutoCompleteRecursive()
         {
             ResetAutoComplete();
-            for (auto& cmd : *cmds)
+            for (auto& cmd : *m_cmds)
             {
                 cmd->ResetAutoCompleteRecursive();
             }
@@ -412,7 +378,7 @@ namespace cli
         void MainHelp(std::ostream& out)
         {
             if (!IsEnabled()) return;
-            for (const auto& cmd : *cmds)
+            for (const auto& cmd : *m_cmds)
                 cmd->Help(out);
         }
 
@@ -424,10 +390,10 @@ namespace cli
 
         AutoCompleter::Completions GetChildCommandCompletions(const std::string& prefix)
         {
-            if (!enabled) { return {}; }
+            if (!m_enabled) { return {}; }
 
             AutoCompleter::Completions completions;
-            for (auto& cmd : *cmds)
+            for (auto& cmd : *m_cmds)
             {
                 if (cmd->Name().find(prefix) == 0)
                 {
@@ -454,7 +420,7 @@ namespace cli
         std::vector<CommandParams> GetCommands(std::vector<std::string> params, size_t currentParam = 0) const
         {
             size_t param = 0;
-            for (auto& cmd : *cmds)
+            for (auto& cmd : *m_cmds)
             {
                 auto cmdResults = cmd->GetCommandsImpl(params, param);
                 if (!cmdResults.empty())
@@ -480,20 +446,17 @@ namespace cli
 
             size_t nextParam = currentParam + paramCount;
             // If we have enough paramaters and still have more param input left, keep going
-            if (paramCount == GetParamCount() && nextParam < params.size() && cmds)
+            if (paramCount == GetParamCount() && nextParam < params.size() && m_cmds)
             {
                 // See if there are child commands
-                if (!cmds->empty())
+                for (auto& cmd : *m_cmds)
                 {
-                    for (auto& cmd : *cmds)
+                    auto results = cmd->GetCommandsImpl(params, nextParam);
+                    if (!results.empty())
                     {
-                        auto results = cmd->GetCommandsImpl(params, nextParam);
-                        if (!results.empty())
-                        {
-                            commands.insert(commands.end(), results.begin(), results.end());
-                            // Command names should be unique
-                            break;
-                        }
+                        commands.insert(commands.end(), results.begin(), results.end());
+                        // Command names should be unique
+                        break;
                     }
                 }
             }
@@ -512,14 +475,14 @@ namespace cli
         // Returns true if param is this command
         bool MatchCommandName(const std::string& param) const
         {
-            if (!enabled) { return false; }
+            if (!m_enabled) { return false; }
             return Name() == param;
         }
 
         // Returns how many parameters to eat, returns 0 if there is no match
         size_t MatchCommand(const std::vector<std::string>& params, size_t commandPosition = 0) const
         {
-            if (!enabled) { return 0; }
+            if (!m_enabled) { return 0; }
 
             if (params.empty() || !MatchCommandName(params[commandPosition]))
             {
@@ -549,7 +512,7 @@ namespace cli
         // Returns true if this command starts with param
         bool StartsWith(const std::string& param) const
         {
-            if (!enabled) { return {}; }
+            if (!m_enabled) { return {}; }
             if (param.empty())
             {
                 // If we have nothing, then say an empty string matches
@@ -565,7 +528,7 @@ namespace cli
             assert(param == 0);
 
             AutoCompleter::Completions results;
-            for (auto& cmd : *cmds)
+            for (auto& cmd : *m_cmds)
             {
                 if (paramStr.empty() || cmd->StartsWith(paramStr))
                 {
@@ -601,7 +564,7 @@ namespace cli
 
         CmdHandler Insert(std::string&& menuName);
 
-        const std::string& Name() const { return name; }
+        const std::string& Name() const { return m_name; }
         const std::string& Description() const { return description; }
 
         const std::string GetPromptDisplay() const
@@ -610,7 +573,7 @@ namespace cli
             {
                 return (*m_displayFunc)();
             }
-            return name;
+            return m_name;
         }
 
         // Includes this name
@@ -621,7 +584,7 @@ namespace cli
 
         const Command* GetCommand(const std::string& name) const
         {
-            for (const auto& cmd : *cmds)
+            for (const auto& cmd : *m_cmds)
             {
                 if (cmd->Name() == name)
                 {
@@ -635,14 +598,14 @@ namespace cli
         void SetDisplayFunc(PromptDisplayFn displayFunc) { m_displayFunc = displayFunc; }
 
     protected:
-        bool IsEnabled() const { return enabled; }
+        bool IsEnabled() const { return m_enabled; }
 
         const std::string description;
 
     private:
         std::optional<PromptDisplayFn> m_displayFunc;
-        const std::string name;
-        bool enabled;
+        const std::string m_name;
+        bool m_enabled;
 
         template <typename F, typename R, typename ... Args>
         CmdHandler Insert(const std::string& name, const std::string& help, const std::vector<std::string>& parDesc, F& f, R(F::*)(std::ostream& out, Args...) const);
@@ -663,7 +626,7 @@ namespace cli
         // using shared_ptr instead of unique_ptr to get a weak_ptr
         // for the CmdHandler::Descriptor
         using Cmds = std::vector<std::shared_ptr<Command>>;
-        std::shared_ptr<Cmds> cmds;
+        std::shared_ptr<Cmds> m_cmds;
     };
 
     // ********************************************************************
@@ -1069,7 +1032,7 @@ namespace cli
             {
                 const size_t zeroIndexedParam = param - 1;
                 std::string paramStrCopy = paramStr;
-                AutoCompleter autoCompleter = ParamUtil<Args...>::CallWith<ParamAutoComplete>(zeroIndexedParam, paramStrCopy);
+                AutoCompleter autoCompleter = ParamUtil<Args...>::template CallWith<ParamAutoComplete>(zeroIndexedParam, paramStrCopy);
                 if (!autoCompleter.HasValues())
                 {
                     return {};
