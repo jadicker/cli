@@ -1,59 +1,68 @@
 #pragma once
 
+#include <ostream>
+
 #include "colorprofile.h"
 
+#include "MechSim/Misc/ObjectId.h"
 #include "MechSim/Central/Mech.h"
+#include "MechSim/Game/Agent.h"
+
+namespace MechSim
+{
+    class Agent;
+}
 
 namespace cli
 {
-	inline std::ostream& operator<<(std::ostream& os, MechSim::ObjectId objectId)
-	{
-		os << Style::ObjectId() << objectId.ToString(false) << "(" << GetObjectName(objectId) << ")"
-			<< reset;
-		return os;
-	}
+    inline std::ostream& operator<<(std::ostream& os, const MechSim::ObjectId& objectId)
+    {
+        os << cli::Style::ObjectId() << objectId.ToString(false) << "(" << GetObjectName(objectId) << ")"
+           << cli::reset;
+        return os;
+    }
 
-	inline std::ostream& operator<<(std::ostream& os, const MechSim::Object& object)
-	{
-		os << Style::Object() << object.GetClass() << reset << " " << object.GetId() << reset;
-		return os;
-	}
+    inline std::ostream& operator<<(std::ostream& os, const MechSim::Object& object)
+    {
+        os << cli::Style::Object() << object.GetClass() << cli::reset << " " << object.GetId() << cli::reset;
+        return os;
+    }
 
-	inline std::ostream& operator<<(std::ostream& os, MechSim::ObjectHandleAny object)
-	{
-		os << *object.Get<MechSim::Object>();
-		return os;
-	}
+    inline std::ostream& operator<<(std::ostream& os, const MechSim::ObjectHandleAny& object)
+    {
+        os << *object.Get<MechSim::Object>();
+        return os;
+    }
 
-	inline std::ostream& operator<<(std::ostream& os, const MechSim::Mech& mech)
-	{
-		os << Style::Mech() << mech.GetName() << reset << " " << mech.GetId() << reset;
-		return os;
-	}
+    inline std::ostream& operator<<(std::ostream& os, const MechSim::Mech& mech)
+    {
+        os << cli::Style::Mech() << mech.GetName() << cli::reset << " " << mech.GetId() << cli::reset;
+        return os;
+    }
 
-	template <typename T, typename IndexType>
-	inline std::ostream& operator<<(std::ostream& os, const Util::VectorHandle<T, IndexType>& vectorHandle)
-	{
-		os << vectorHandle.GetIndex() << reset;
-		return os;
-	}
+    template<typename T, typename IndexType>
+    inline std::ostream& operator<<(std::ostream& os, const Util::VectorHandle<T, IndexType>& vectorHandle)
+    {
+        os << vectorHandle.GetIndex() << cli::reset;
+        return os;
+    }
 
-	inline std::ostream& operator<<(std::ostream& os, const MechSim::Object* object)
-	{
-		if (!object)
-		{
-			os << Style::Object() << "Invalid" << reset;
-		}
-		else
-		{
-			os << *object;
-		}
-		return os;
-	}
+    inline std::ostream& operator<<(std::ostream& os, const MechSim::Object* object)
+    {
+        if (!object)
+        {
+            os << cli::Style::Object() << "Invalid" << cli::reset;
+        }
+        else
+        {
+            os << *object;
+        }
+        return os;
+    }
 
-	inline std::ostream& operator<<(std::ostream& os, const MechSim::Agent& agent)
-	{
-		os << agent.GetName();
-		return os;
-	}
+    inline std::ostream& operator<<(std::ostream& os, const MechSim::Agent& agent)
+    {
+        os << agent.GetName();
+        return os;
+    }
 }

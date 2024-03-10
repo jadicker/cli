@@ -1,7 +1,11 @@
 #pragma once
 
 #include "colorprofile.h"
+#include "mechsimtostring.h"
 #include "detail/autocomplete.h"
+
+#include "cli/param.h"
+#include "cli/paramDefinition.h"
 
 #include <cli/detail/fromstring.h>
 #include <limits>
@@ -129,7 +133,7 @@ namespace cli
 		struct None
 		{
 			template <typename T>
-			static bool Get(const T*)
+			static bool Get(const v2::ParamContext&, const T*)
 			{
 				return true;
 			}
@@ -138,30 +142,31 @@ namespace cli
 		struct MountableByController
 		{
 			template <typename T>
-			static bool Get(const T* obj)
+			static bool Get(const v2::ParamContext& ctx, const T* obj)
 			{
-				if (!MechSim::Game::GetInstance().m_controllerToMount)
+                const auto* controller = ctx.GetPreviousParam<MechSim::Controller*>();
+				if (!controller)
 				{
 					return false;
 				}
-				return MechSim::Game::GetInstance().m_controllerToMount->CanControl(obj);
+				return controller->CanControl(obj);
 			}
 		};
 
 		struct NotInstalled
 		{
 			template <typename T>
-			static bool Get(const T* obj)
+			static bool Get(const v2::ParamContext& ctx, const T* obj)
 			{
-				return obj->GetId().GetRootId() == MechSim::WorldObjectId ||
-					obj->GetId().GetRootId() == MechSim::AnonObjectId;
+				return obj->GetId().GetRootId() == MechSim::WorldObjectId.GetRootId() ||
+					obj->GetId().GetRootId() == MechSim::AnonObjectId.GetRootId();
 			}
 		};
 
 		struct Installed
 		{
 			template <typename T>
-			static bool Get(const T* obj)
+			static bool Get(const v2::ParamContext& ctx, const T* obj)
 			{
 				return MechSim::ObjectId(obj->GetId().GetRootId()) != MechSim::WorldObjectId &&
 					MechSim::ObjectId(obj->GetId().GetRootId()) != MechSim::AnonObjectId;
@@ -171,13 +176,14 @@ namespace cli
 		struct IsMech
 		{
 			template <typename T>
-			static bool Get(const T* obj)
+			static bool Get(const v2::ParamContext& ctx, const T* obj)
 			{
 				return obj->GetId().GetLeaf().second == 0;
 			}
 		};
 	}
 
+#if 0
 	template <typename T, typename FilterFnObj>
 	class FilteredObjParam final
 	{
@@ -229,7 +235,7 @@ namespace cli
 	private:
 		T* m_object = nullptr;
 	};
-	
+
 	template <typename T, typename FilterFnObj>
 	inline std::ostream& operator<<(std::ostream& os, const FilteredObjParam<T, FilterFnObj>& objParam)
 	{
@@ -250,7 +256,8 @@ namespace cli
 	using Readable = ObjParam<MechSim::Readable>;
 	using Joystick = ObjParam<MechSim::Joystick>;
 	using Part = ObjParam<MechSim::Part>;
-	
+#endif
+
 	class PartName
 	{
 	public:
@@ -344,29 +351,6 @@ namespace cli
 		size_t m_id = std::numeric_limits<size_t>::max();
 	};
 
-	class ModuleSlotId : public Id
-	{
-	public:
-		static AutoCompleter::Completions GetCompletions()
-		{
-			AutoCompleter::Completions results;
-			const auto& slots = MechSim::Game::GetInstance().m_activeModule->DescribeSlots();
-			size_t id = 0;
-			for (const std::string& slot : slots)
-			{	
-				results.push_back({ std::to_string(id), slot });
-				++id;
-			}
-			return results;
-		}
-
-	protected:
-		bool Validate(size_t id) const override
-		{
-			return id < MechSim::Game::GetInstance().m_activeModule->GetSlotCount();
-		}
-	};
-
 	class MechId : public Id
 	{
 	public:
@@ -376,7 +360,7 @@ namespace cli
 			const auto& allRootObjectIds = MechSim::ObjectRegistry::GetInstance().GetAllRootObjectIds();
 			for (const auto& mechId : allRootObjectIds)
 			{
-				results.push_back({ mechId.ToString(), "Mech description here..."});
+				results.push_back({ mechId.ToString(false), "Mech description here..."});
 			}
 			return results;
 		}
@@ -418,7 +402,7 @@ namespace cli
 	protected:
 		bool Validate(size_t id) const override
 		{
-			return id < MechSim::GetMech()->GetReactor()->ConnectionCount;
+			return id < MechSim::GetMech()->GetReactor()->kConnectionCount;
 		}
 	};
 
@@ -590,6 +574,7 @@ namespace cli
 		}
 	};
 
+#if 0
 	template <typename T, typename FilterFnObj>
 	struct ParamAutoComplete<FilteredObjParam<T, FilterFnObj>>
 	{
@@ -736,4 +721,266 @@ namespace cli
 
 #undef DEFINE_BASIC_FROM_STRING
 #undef NAME_BASIC_TYPE
+
+#endif
+
+    namespace v2
+    {
+        template <typename T, typename FilterFn = ObjFilters::None>
+        class FilteredObj : public Param
+        {
+        public:
+            explicit FilteredObj(std::string name) : Param(std::move(name))
+            {
+            }
+
+            bool Prepare(ParamContext& ctx, const std::string& token) override
+            {
+                auto result = ParseWrapper(ctx, token);
+                if (!result)
+                {
+                    return false;
+                }
+                m_object = std::any_cast<T*>(*result);
+                return true;
+            }
+
+            Completions GetAutoCompletions(ParamContext& ctx, const std::string& token) const override
+            {
+                Completions completions;
+
+                const MechSim::ObjectId filterId = MechSim::ObjectId::FromString(token);
+
+                const auto* mech = MechSim::GetMech();
+                auto& reg = MechSim::ObjectRegistry::GetInstance();
+                const auto& objects = !mech ?
+                                      reg.GetAllObjectsOfTypeWithObject<T>(MechSim::NullObjectId) :
+                                      reg.GetAllObjectsOfTypeWithObject<T>(mech->GetId());
+                for (const auto& pair : objects)
+                {
+                    if (!FilterFn::Get(ctx, pair.first))
+                    {
+                        continue;
+                    }
+
+                    const MechSim::Object* obj = pair.second;
+                    if (filterId.IsValid() && !obj->GetId().StartsWith(filterId))
+                    {
+                        continue;
+                    }
+
+                    auto text = obj->GetName();
+                    const auto& desc = obj->GetDescription();
+                    if (!desc.empty())
+                    {
+                        text += ": " + obj->GetDescription();
+                    }
+                    completions.push_back({ obj->GetId().ToString(), text });
+                }
+
+                return completions;
+            }
+
+            std::any GetValue() const override { return m_object; }
+
+            const char* GetTypeName() const override
+            {
+                // TODO: Child types for filters to get the correct name?
+                return v2::TypeDesc<T>::Name();
+            }
+
+        protected:
+            T* m_object = nullptr;
+
+        private:
+            std::optional<std::any> Parse(const ParamContext& ctx, const std::string& token) const override
+            {
+                T* object = cli::GetObj<T>(ctx.m_out, GetName(), token);
+
+                if (!static_cast<bool>(object) ||
+                    !FilterFn::template Get<T>(ctx, object))
+                {
+                    object = nullptr;
+                    return {};
+                }
+
+                return object;
+            }
+        };
+
+        using AnyObjectParam = v2::FilteredObj<MechSim::Object>;
+        using PartParam = v2::FilteredObj<MechSim::Part>;
+        using MechParam = v2::FilteredObj<MechSim::Mech>;
+        using PowerableParam = v2::FilteredObj<MechSim::Powerable>;
+        using Readable = v2::FilteredObj<MechSim::Readable>;
+
+        class PartName : public Param
+        {
+        public:
+            DECLARE_PARAM(PartName, std::string)
+
+            DEFINE_PREPARE(m_value, std::string)
+
+            Completions GetAutoCompletions(ParamContext& ctx, const std::string& token) const override
+            {
+                using namespace MechSim;
+
+                Completions completions;
+
+                std::vector<std::pair<std::string, const ObjectRegistry::PartClassInfo*>> allParts = GetObjectRegistry().GetAutoCompletions(token);
+                for (auto&& pair : allParts)
+                {
+                    completions.push_back({ pair.first, pair.second->m_partInfo->m_className });
+                }
+
+                return completions;
+            }
+
+            std::any GetValue() const override { return m_value; }
+
+            const char* GetTypeName() const override
+            {
+                return "PartName";
+            }
+
+        protected:
+            std::optional<std::any> Parse(const ParamContext& ctx, const std::string& token) const override
+            {
+                const auto* info = MechSim::GetObjectRegistry().FindPartClass(token);
+                if (!info)
+                {
+                    ctx.m_out << GetName() << ": received invalid part name '" << token << "'" << std::endl;
+                    return {};
+                }
+
+                return info->m_name;
+            }
+
+        private:
+            // Part doesn't actually have the class name...
+            std::string m_value;
+        };
+
+        class PartInfoParam : public Param
+        {
+        public:
+            DECLARE_PARAM(PartInfoParam, const MechSim::PartInfo*)
+
+            DEFINE_PREPARE(m_value, const MechSim::PartInfo*)
+
+            Completions GetAutoCompletions(ParamContext& ctx, const std::string& token) const override
+            {
+                Completions completions;
+                // TODO: Auto-complete this?
+                return completions;
+            }
+
+            std::any GetValue() const override { return m_value; }
+
+            const char* GetTypeName() const override
+            {
+                return "PartInfoParam";
+            }
+
+        protected:
+            std::optional<std::any> Parse(const ParamContext& ctx, const std::string& token) const override
+            {
+                auto& reg = MechSim::GetObjectRegistry();
+                const MechSim::ObjectRegistry::PartClassInfo* info = reg.FindPartClass(token);
+                if (info)
+                {
+                    return info->m_partInfo;
+                }
+
+                const auto objectId = MechSim::ObjectId::FromString(token);
+                if (auto part = dynamic_cast<const MechSim::Part*>(reg.Get(objectId)))
+                {
+                    const auto* classInfo = reg.GetPartClassInfo(part->GetClass());
+                    if (!classInfo)
+                    {
+                        ctx.m_out << "No class info found for " << objectId << ", for part name '"
+                                  << part->GetName() << "'!" << std::endl;
+                        return false;
+                    }
+
+                    return classInfo->m_partInfo;
+                }
+
+                ctx.m_out << GetName() << ": received invalid part name/object id '" << token << "'" << std::endl;
+                return {};
+            }
+
+        private:
+            const MechSim::PartInfo* m_value = nullptr;
+        };
+
+        // Can be an index or a string of chars in {x: 0, y: 1, z: 2, w: 3}
+        class InputAxisIds : public Param
+        {
+        public:
+            DECLARE_PARAM(InputAxisIds, std::vector<int>)
+
+            DEFINE_PREPARE(m_value, std::vector<int>)
+
+            Completions GetAutoCompletions(ParamContext& ctx, const std::string& token) const override
+            {
+                Completions completions;
+                // TODO: Auto-complete this?
+                return completions;
+            }
+
+            std::any GetValue() const override { return m_value; }
+
+            const char* GetTypeName() const override
+            {
+                return "PartInfoParam";
+            }
+
+        protected:
+            std::optional<std::any> Parse(const ParamContext& ctx, const std::string& token) const override
+            {
+                std::vector<int> ids;
+                auto index = MechSim::ReadInt(token);
+                if (index)
+                {
+                    if (*index < 0 || *index > 3)
+                    {
+                        ctx.m_out << Style::Error(GetName() + ": received invalid input axis, must be 0,1,2, or 3.  Got ")
+                                  << token << "\n";
+                        return {};
+                    }
+
+                    ids.push_back(*index);
+                    return ids;
+                }
+
+                auto pushId = [this, &ids](int id)
+                {
+                    if (std::find(ids.begin(), ids.end(), id) == ids.end())
+                    {
+                        ids.push_back(id);
+                    }
+                };
+
+                for (const char c : token)
+                {
+                    if (c == 'x') { pushId(0); }
+                    else if (c == 'y') { pushId(1); }
+                    else if (c == 'z') { pushId(2); }
+                    else if (c == 'w') { pushId(3); }
+                    else
+                    {
+                        ctx.m_out << Style::Error(GetName() + ": received invalid input axis name ") << c << "\n";
+                        ids.clear();
+                        return {};
+                    }
+                }
+
+                return ids;
+            }
+
+        private:
+            std::vector<int> m_value;
+        };
+    }
 }

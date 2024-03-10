@@ -35,8 +35,9 @@
 #include "autocomplete.h"
 #include "terminal.h"
 #include "inputdevice.h"
-#include "../cli.h" // CliSession
+//#include "../cli.h" // CliSession
 #include "commonprefix.h"
+#include "../cliSession2.h"
 
 namespace cli
 {
@@ -48,9 +49,11 @@ class InputHandler
     friend class ::ConsoleTestRunner;
 
 public:
+    using CliSession = cli::v2::CliSession;
+
     InputHandler(CliSession& _session, InputDevice& kb) :
         session(_session),
-        terminal(session.OutStream())
+        terminal(session.GetOutStream())
     {
         kb.Register( [this](auto key){ this->Keypressed(key); } );
     }
@@ -132,6 +135,101 @@ private:
     CliSession& session;
     Terminal terminal;
 };
+
+namespace v2
+{
+    class InputHandler
+    {
+        friend class ::ConsoleTestRunner;
+
+        using CliSession = cli::v2::CliSession;
+
+    public:
+        InputHandler(CliSession& _session, InputDevice& kb) :
+            session(_session),
+            terminal(session.GetOutStream())
+        {
+            kb.Register([this](auto key) { this->Keypressed(key); });
+        }
+
+        void SetPromptSize(size_t size)
+        {
+            terminal.SetLineStart(size);
+        }
+
+    private:
+
+        void Keypressed(std::pair<KeyType, char> k)
+        {
+            const std::pair<Symbol, std::string> s = terminal.Keypressed(k);
+            NewCommand(s);
+        }
+
+        void EnterText(const std::string& str)
+        {
+            for (auto c : str)
+            {
+                NewCommand(terminal.Keypressed({ KeyType::ascii, c }));
+            }
+        }
+
+        void AutoComplete()
+        {
+            //NewCommand({ Symbol::tab, '\t' });
+        }
+
+        void NewCommand(const std::pair<Symbol, std::string>& s)
+        {
+            switch (s.first)
+            {
+            case Symbol::nothing:
+            {
+                break;
+            }
+            case Symbol::eof:
+            {
+                session.Exit();
+                break;
+            }
+            case Symbol::command:
+            {
+                session.Feed(s.second);
+                session.Prompt();
+                break;
+            }
+            case Symbol::down:
+            {
+                terminal.SetLine(session.NextCmd());
+                break;
+            }
+            case Symbol::up:
+            {
+                auto line = terminal.GetLine();
+                terminal.SetLine(session.PreviousCmd(line));
+                break;
+            }
+            case Symbol::tab:
+            {
+                auto lineInfo = terminal.GetAutoCompleteLine();
+
+                auto completions = session.GetCompletions(lineInfo.first, lineInfo.second);
+                if (completions.m_completions.empty())
+                {
+                    break;
+                }
+
+                terminal.SetCompletions(completions.m_completionParamIndex, completions.m_completions,
+                                        completions.m_command ? completions.m_command->Description() : "");
+                break;
+            }
+            }
+
+        }
+
+        CliSession& session;
+        Terminal terminal;
+    };
+}
 
 } // namespace detail
 } // namespace cli

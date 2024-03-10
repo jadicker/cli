@@ -32,7 +32,7 @@
 
 #include <ostream> // std::ostream
 #include "detail/inputhandler.h"
-#include "cli.h" // CliSession
+#include "cliSession2.h"
 #include "detail/keyboard.h"
 
 class ConsoleTestRunner;
@@ -42,6 +42,7 @@ namespace cli
 
 class Scheduler; // forward declaration
 
+#if 0
 /**
  * @brief CliLocalTerminalSession represents a local session.
  * You should instantiate it to start an interactive prompt on the standard
@@ -79,8 +80,44 @@ private:
     detail::Keyboard kb;
     detail::InputHandler ih;
 };
+#endif
 
-using CliLocalSession = CliLocalTerminalSession;
+namespace v2
+{
+    class CliLocalTerminalSession : public v2::CliSession
+    {
+    public:
+        friend class ::ConsoleTestRunner;
+
+        /**
+         * @brief Construct a new Cli Local Terminal Session object that uses the specified @c std::ostream
+         * for output. You can also specify a size for the command history.
+         *
+         * @param _cli The cli object that defines the menu hierarchy for this session
+         * @param scheduler The scheduler that will process the command handlers
+         * @param _out the output stream where command output will be printed
+         * @param historySize the size of the command history
+         */
+        CliLocalTerminalSession(Cli& _cli, Scheduler& scheduler, std::ostream& _out, std::size_t historySize = 100) :
+            CliSession(_cli, _out, historySize),
+            m_keyboard(scheduler),
+            m_inputHandler(*this, m_keyboard)
+        {
+            Prompt();
+        }
+
+    private:
+        void SetPromptSize(size_t size) override
+        {
+            m_inputHandler.SetPromptSize(size);
+        }
+
+        detail::Keyboard m_keyboard;
+        detail::v2::InputHandler m_inputHandler;
+    };
+}
+
+using CliLocalSession = cli::v2::CliLocalTerminalSession;
 
 } // namespace cli
 

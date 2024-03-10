@@ -1,68 +1,9 @@
-﻿
+﻿#if 0
 #include "../include/cli/cli.h"
 
 #include <MechSim/Misc/Event.h>
 
 using namespace cli;
-
-Utf8StringInfo GetUtf8Info(const std::string& str)
-{
-    Utf8StringInfo info;
-    bool onExtendedChar = false;
-
-    for (size_t i = 0; i < str.size(); i++)
-    {
-        if ((0x80 & str[i]) > 0)
-        {
-            if (onExtendedChar)
-            {
-                info.extraBytes++;
-            }
-            else
-            {
-                onExtendedChar = true;
-                info.charCount++;
-            }
-
-            continue;
-        }
-        onExtendedChar = false;
-
-        info.charCount++;
-    }
-
-    return info;
-}
-
-std::string cli::Pad(const std::string& str, size_t count)
-{
-    std::string out;
-    out.reserve(count);
-    for (size_t i = 0; i < count; ++i)
-    {
-        out += str;
-    }
-    return out;
-}
-
-size_t cli::get_n_chars_from_back_utf8(const std::string& str, size_t n)
-{
-    for (int i = static_cast<int>(str.size()) - 1; i >= 0; --i)
-    {
-        if ((0x80 & str[i]) > 0)
-        {
-            continue;
-        }
-
-        --n;
-        if (n == 0)
-        {
-            return i;
-        }
-    }
-
-    return 0;
-}
 
 bool Command::Exec(const std::vector<std::string>& cmdLine, CliSession& session)
 {
@@ -88,8 +29,8 @@ CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
     cli(_cli),
     coutPtr(Cli::CoutPtr()),
     m_current(cli.RootMenu()),
-    m_rootMenu(m_current),
     globalScopeMenu(std::make_unique< Command >()),
+    m_rootMenu(m_current),
     out(_out),
     history(historySize)
 {
@@ -167,18 +108,18 @@ bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCm
     {
         auto result = m_current->ScanCmds(strs, *this);
 
-        if (result.second == Command::ScanResultAction::NoneFound)
+        if (result.second == Command::ScanResult::NoneFound)
         {
             result = cli.rootMenu->ScanCmds(strs, *this);
         }
 
         // root menu recursive cmds check
-        if (result.second == Command::ScanResultAction::NoneFound)
+        if (result.second == Command::ScanResult::NoneFound)
         {
             result = globalScopeMenu->ScanCmds(strs, *this);
         }
 
-        if (result.second != Command::ScanResultAction::Executed)
+        if (result.second != Command::ScanResult::Found)
         {
             if (result.first.empty())
             {
@@ -251,7 +192,7 @@ bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCm
             }
         }
 
-        return result.second == Command::ScanResultAction::Executed;
+        return result.second == Command::ScanResult::Found;
     }
     catch (const std::exception& e)
     {
@@ -569,7 +510,7 @@ Command::ScanResult Command::ScanCmds(const std::vector<std::string>& cmdLine, C
         {
             results.first.push_back(&command.m_command.get());
         }
-        results.second = ScanResultAction::BadParams;
+        results.second = ScanResult::BadParams;
         return results;
     }
 
@@ -586,7 +527,7 @@ Command::ScanResult Command::ScanCmds(const std::vector<std::string>& cmdLine, C
         paramOffset += commands[i].m_paramsFound;
 
         results.first.push_back(&cmd);
-        results.second = ScanResultAction::Executed;
+        results.second = ScanResult::Found;
         if (!cmd.Exec(localParams, session))
         {
             // We still executed _something_, it just failed
@@ -599,3 +540,4 @@ Command::ScanResult Command::ScanCmds(const std::vector<std::string>& cmdLine, C
 
     return results;
 }
+#endif
