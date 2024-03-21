@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-using namespace cli::v2;
+using namespace cli;
 
 CompletionResults Parameters::AutoComplete(ParamContext& ctx,
                                            const std::vector<std::string>& paramTokens,

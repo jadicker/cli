@@ -6,7 +6,6 @@
 #include <MechSim/Common.h>
 
 using namespace cli;
-using namespace cli::v2;
 
 namespace
 {
@@ -52,7 +51,7 @@ CompletionResults Command::AutoCompleteImpl(ParamContext& ctx,
     return m_params.AutoComplete(ctx, paramOnlyTokens, paramIndex - 1);
 }
 
-CompletionResults v2::Command::GetAllChildrenCompletions(const std::string& token) const
+CompletionResults Command::GetAllChildrenCompletions(const std::string& token) const
 {
     CompletionResults result;
     for (const auto& child : m_children)
@@ -65,7 +64,7 @@ CompletionResults v2::Command::GetAllChildrenCompletions(const std::string& toke
     return result;
 }
 
-void v2::Command::MainHelp(std::ostream& out)
+void Command::MainHelp(std::ostream& out)
 {
     for (const auto& child : m_children)
     {
@@ -73,17 +72,17 @@ void v2::Command::MainHelp(std::ostream& out)
     }
 }
 
-void v2::Command::Help(std::ostream& out) const
+void Command::Help(std::ostream& out) const
 {
     out << " - " << m_name << "\n\t" << m_desc << "\n";
 }
 
-detail::AutoCompletion v2::Command::GetCompletion() const
+detail::AutoCompletion Command::GetCompletion() const
 {
     return { m_name, m_desc };
 }
 
-std::shared_ptr<const Command> v2::Command::FindChildCommand(const std::string& name) const
+std::shared_ptr<const Command> Command::FindChildCommand(const std::string& name) const
 {
     for (const auto& cmd : m_children)
     {
@@ -95,31 +94,32 @@ std::shared_ptr<const Command> v2::Command::FindChildCommand(const std::string& 
     return nullptr;
 }
 
-PreparationResult v2::Command::Prepare(ParamContext& paramContext,
+PreparationResult Command::Prepare(ParamContext& paramContext,
                                        const std::vector<std::string>& tokens,
                                        size_t currentIndex)
 {
     if (tokens.empty() || currentIndex >= tokens.size() || tokens[currentIndex] != m_name)
     {
-        return { v2::ScanResult::NoneFound, 0 };
+        return { ScanResult::NoneFound, 0 };
     }
 
     auto results = m_params.Prepare(paramContext, tokens, currentIndex + 1);
     if (!results.m_indicesFailedToParse.empty())
     {
-        paramContext.m_out << Style::Red() << "Error: failed to parse command.  Bad param(s):" << std::endl;
+        paramContext.m_out << "Error: Bad param(s) for " << GetSignature() << std::endl;
         for (size_t i : results.m_indicesFailedToParse)
         {
-            paramContext.m_out << "\t'" << tokens[i] << "'" << std::endl;
+            const size_t paramIndex = i - (currentIndex + 1);
+            paramContext.m_out << "  " << m_params.GetParams()[paramIndex]->GetName() << ":   '" << tokens[i] << "'" << std::endl;
         }
     }
 
     size_t tokensPrepared = results.m_prepared + 1;
-    v2::ScanResult scanResult = (tokensPrepared == GetTotalTokens()) ? v2::ScanResult::Found : v2::ScanResult::BadOrMissingParams;
+    ScanResult scanResult = (tokensPrepared == GetTotalTokens()) ? ScanResult::Found : ScanResult::BadOrMissingParams;
     return { scanResult, tokensPrepared };
 }
 
-void v2::Command::Cleanup() const
+void Command::Cleanup() const
 {
     if (m_onExit)
     {
@@ -127,7 +127,7 @@ void v2::Command::Cleanup() const
     }
 }
 
-void v2::Command::ScanRecursiveImpl(ParamContext& ctx,
+void Command::ScanRecursiveImpl(ParamContext& ctx,
                                     const std::vector<std::string>& cmdLineTokens,
                                     ExecutionResult& result)
 {
@@ -142,14 +142,14 @@ void v2::Command::ScanRecursiveImpl(ParamContext& ctx,
         auto prepareResult = command->Prepare(ctx, cmdLineTokens, result.m_paramsConsumed);
         result.m_paramsConsumed += prepareResult.m_tokensSuccessfullyParsed;
         result.m_action = prepareResult.m_scanResult;
-        if (prepareResult.m_scanResult == v2::ScanResult::Found)
+        if (prepareResult.m_scanResult == ScanResult::Found)
         {
             result.m_commandsScanned.push_back(command);
             // Note: execution already modifies the current index
             command->ScanRecursiveImpl(ctx, cmdLineTokens, result);
             break;
         }
-        else if (prepareResult.m_scanResult == v2::ScanResult::BadOrMissingParams)
+        else if (prepareResult.m_scanResult == ScanResult::BadOrMissingParams)
         {
             result.m_partialCommand = command;
             break;
@@ -157,7 +157,7 @@ void v2::Command::ScanRecursiveImpl(ParamContext& ctx,
     }
 }
 
-ExecutionResult v2::Command::ExecuteRecursive(std::ostream& out,
+ExecutionResult Command::ExecuteRecursive(std::ostream& out,
                                               const std::vector<std::string>& cmdLineTokens)
 {
     // This command is the current context when doing recursive execution
@@ -167,7 +167,7 @@ ExecutionResult v2::Command::ExecuteRecursive(std::ostream& out,
 
     if (results.m_commandsScanned.empty())
     {
-        results.m_action = v2::ScanResult::NoneFound;
+        results.m_action = ScanResult::NoneFound;
     }
     else
     {
@@ -183,14 +183,18 @@ ExecutionResult v2::Command::ExecuteRecursive(std::ostream& out,
             maxTokens += command->GetTotalTokens();
         }
 
-        if (results.m_paramsConsumed == maxTokens)
+        if (results.m_partialCommand)
         {
-            results.m_action = v2::ScanResult::Found;
+            results.m_action = ScanResult::PartialCompletion;
+        }
+        else if (results.m_paramsConsumed == maxTokens)
+        {
+            results.m_action = ScanResult::Found;
         }
         else
         {
             // > 0 bad params
-            results.m_action = v2::ScanResult::BadOrMissingParams;
+            results.m_action = ScanResult::BadOrMissingParams;
         }
     }
 
@@ -200,40 +204,9 @@ ExecutionResult v2::Command::ExecuteRecursive(std::ostream& out,
     return results;
 }
 
-#if 0
-v2::CompletionResults Command::AutoComplete(ParamContext& ctx,
-                                            const std::vector<std::string>& cmdLineTokens)
-{
-    ExecutionResult scanResult(ctx.m_out);
-    ScanRecursiveImpl(ctx.m_out, cmdLineTokens, scanResult);
-
-    if (scanResult.m_action == v2::ScanResult::Found)
-    {
-        // Found everything, nothing left to do
-        return {};
-    }
-
-    const Command* completionCommand = this;
-    if (scanResult.m_partialCommand)
-    {
-        completionCommand = scanResult.m_partialCommand.get();
-    }
-    else if (!scanResult.m_commandsScanned.empty())
-    {
-        completionCommand = scanResult.m_commandsScanned.back().get();
-    }
-
-    // 0 or more commands were executed.  It doesn't really matter why execution of the last
-    // command failed, auto-complete will figure out what to do
-    size_t paramIndex = scanResult.m_paramsConsumed;
-
-    return completionCommand->AutoCompleteImpl(ctx, cmdLineTokens, paramIndex);
-}
-#endif
-
 void Command::Execute(std::ostream& out)
 {
-    m_onExec(out, m_params);
+    m_onExec(out, GetAllCommands());
 }
 
 void Command::AddParams(ParamContext &ctx) const
@@ -246,4 +219,41 @@ ParamContext Command::BuildParamContext(std::ostream& out) const
     ParamContext ctx(out);
     BuildParamContextRecursive(ctx, this);
     return ctx;
+}
+
+std::vector<Command::CommandPtr> Command::GetAllCommands() const
+{
+    std::vector<CommandPtr> commands;
+    auto command = shared_from_this();
+    //std::shared_ptr<CommandPtr> command = thisCommand;
+    do
+    {
+        commands.push_back(command);
+        command = command->GetParent();
+    }
+    while (command);
+
+    std::reverse(commands.begin(), commands.end());
+    return commands;
+}
+
+std::string Command::GetSignature() const
+{
+    std::stringstream out;
+    out << Name() << "(";
+
+    const auto& params = m_params.GetParams();
+    for (size_t i = 0; i < params.size(); ++i)
+    {
+        const auto& param = params[i];
+        out << *param;
+        if (i != params.size() - 1)
+        {
+            out << ", ";
+        }
+    }
+
+    out << ")";
+
+    return out.str();
 }

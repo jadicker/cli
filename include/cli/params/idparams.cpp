@@ -4,7 +4,7 @@
 #include "MechSim/Central/Modules.h"
 #include "MechSim/Central/Mech.h"
 
-using namespace cli::v2;
+using namespace cli;
 
 ConnectorPortParam::ConnectorPortParam(std::string name)
         : PODParam(std::move(name))
@@ -14,9 +14,9 @@ ConnectorPortParam::ConnectorPortParam(std::string name)
 Completions ConnectorPortParam::GetAutoCompletions(ParamContext& ctx, const std::string& token) const
 {
     Completions results;
-    if (const auto* connectable = ctx.GetPreviousParam<MechSim::Connectable*>())
+    if (const auto connectable = ctx.GetPreviousParam<MechSim::Connectable*>())
     {
-        connectable->VisitAllConnectors(
+        (*connectable)->VisitAllConnectors(
                 [&results](const MechSim::Connector* connector) -> bool
                 {
                     results.push_back({std::to_string(results.size()), connector->GetDescription()});
@@ -28,8 +28,13 @@ Completions ConnectorPortParam::GetAutoCompletions(ParamContext& ctx, const std:
 
 std::optional<std::any> ConnectorPortParam::Parse(const ParamContext& ctx, const std::string& token) const
 {
-    const auto* connectablePart = ctx.GetPreviousParam<MechSim::Part*>();
-    const auto* connectable = dynamic_cast<const MechSim::Connectable*>(connectablePart);
+    const auto connectablePart = ctx.GetPreviousParam<MechSim::Part*>();
+    if (!connectablePart)
+    {
+        return {};
+    }
+
+    const auto* connectable = dynamic_cast<const MechSim::Connectable*>(*connectablePart);
     if (!connectable)
     {
         return {};
@@ -51,7 +56,8 @@ std::optional<std::any> ConnectorPortParam::Parse(const ParamContext& ctx, const
 
 const MechSim::Connectable* ConnectorPortParam::GetActiveConnectable(const ParamContext& ctx)
 {
-    return ctx.GetPreviousParam<MechSim::Connectable*>();
+    auto connectable = ctx.GetPreviousParam<MechSim::Connectable*>();
+    return connectable ? *connectable : nullptr;
 }
 
 ModuleSlotParam::ModuleSlotParam(std::string name)
@@ -77,7 +83,8 @@ Completions ModuleSlotParam::GetAutoCompletions(ParamContext& ctx, const std::st
 
 const MechSim::Module* ModuleSlotParam::GetModule(const ParamContext& ctx)
 {
-    return ctx.GetPreviousParam<MechSim::Module*>();
+    auto connectable = ctx.GetPreviousParam<MechSim::Module*>();
+    return connectable ? *connectable : nullptr;
 }
 
 std::optional<std::any> ModuleSlotParam::Parse(const ParamContext& ctx, const std::string& token) const
@@ -115,9 +122,9 @@ ReactorLineParam::ReactorLineParam(std::string name)
 Completions ReactorLineParam::GetAutoCompletions(ParamContext& ctx, const std::string& token) const
 {
     Completions results;
-    const auto* reactor = ctx.GetPreviousParam<MechSim::Reactor*>();
+    const auto reactor = ctx.GetPreviousParam<MechSim::Reactor*>();
     assert(reactor);
-    const auto& plugs = reactor->GetPlugs();
+    const auto& plugs = (*reactor)->GetPlugs();
     for (size_t i = 0; i < plugs.size(); ++i)
     {
         std::stringstream str;

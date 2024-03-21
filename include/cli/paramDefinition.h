@@ -16,7 +16,12 @@
 #include <vector>
 #include <fstream>
 
-namespace cli::v2
+// Declares a type name
+#define NAME_BASIC_TYPE(typeName) template <> struct TypeDesc< typeName > { static const char* Name() { return #typeName; } };
+
+#define NAME_TYPE(typeName, type) template <> struct TypeDesc< type > { static const char* Name() { return #typeName; } };
+
+namespace cli
 {
     template <typename T> struct TypeDesc { static const char* Name() { return ""; } };
     template <> struct TypeDesc< char > { static const char* Name() { return "<char>"; } };

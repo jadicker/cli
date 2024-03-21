@@ -1,6 +1,6 @@
 #include "param.h"
 
-using namespace cli::v2;
+using namespace cli;
 
 Param::Param(std::string name)
         : m_name(std::move(name))

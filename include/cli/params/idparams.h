@@ -8,7 +8,7 @@ namespace MechSim
     class Module;
 }
 
-namespace cli::v2
+namespace cli
 {
     class ConnectorPortParam : public PODParam<size_t>
     {
@@ -27,6 +27,7 @@ namespace cli::v2
 
         static const MechSim::Connectable* GetActiveConnectable(const ParamContext& ctx);
     };
+    NAME_BASIC_TYPE(ConnectorPortParam);
 
     class ModuleSlotParam : public PODParam<size_t>
     {
@@ -46,6 +47,7 @@ namespace cli::v2
     private:
         static const MechSim::Module* GetModule(const ParamContext& ctx);
     };
+    NAME_BASIC_TYPE(ModuleSlotParam);
 
     class ReactorLineParam : public PODParam<size_t>
     {
@@ -62,4 +64,5 @@ namespace cli::v2
     protected:
         std::optional<std::any> Parse(const ParamContext& ctx, const std::string& token) const override;
     };
+    NAME_BASIC_TYPE(ReactorLineParam);
 }

@@ -33,11 +33,10 @@
 #include <string>
 #include <iostream>
 #include <stdexcept> // std::invalid_argument
-#include "cli.h" // CliSession
+#include "cli2.h" // CliSession
 
 namespace cli
 {
-
 class CliFileSession : public CliSession
 {
 public:

@@ -9,7 +9,7 @@
 #include <vector>
 
 
-namespace cli::v2
+namespace cli
 {
     class CliSession;
 
@@ -17,7 +17,10 @@ namespace cli::v2
     {
         NoneFound,
         Found,
-        BadOrMissingParams
+        // Single/all commands failed with bad or missing params
+        BadOrMissingParams,
+        // Some commands succeeded but there is a partially completed command
+        PartialCompletion,
     };
 
     struct PreparationResult
@@ -39,7 +42,8 @@ namespace cli::v2
     class Command final : public std::enable_shared_from_this<Command>
     {
     public:
-        using Callback = std::function<void(std::ostream&, const Parameters& params)>;
+        using CommandPtr = std::shared_ptr<const Command>;
+        using Callback = std::function<void(std::ostream&, const std::vector<CommandPtr>&)>;
         using ExitCallback = std::function<void()>;
         using PromptDisplayFn = std::function<std::string()>;
 
@@ -92,7 +96,11 @@ namespace cli::v2
 
         const std::string& Name() const { return m_name; }
         const std::string& Description() const { return m_desc; }
+        std::string GetSignature() const;
+
         size_t GetParamCount() const { return m_params.size(); }
+        // No guarantee that they're valid, check the context you're in!
+        const Parameters& GetParameters() const { return m_params; }
 
         // Count of name and all parameters
         size_t GetTotalTokens() const { return 1 + GetParamCount(); }
@@ -153,7 +161,7 @@ namespace cli::v2
         {
             auto command = std::make_shared<Command>(std::move(name),
                                                      std::move(description),
-                                                     v2::Parameters::Null(),
+                                                     Parameters::Null(),
                                                      std::move(onExecute),
                                                      shared_from_this());
             m_children.push_back(command);
@@ -167,7 +175,7 @@ namespace cli::v2
         {
             auto command = std::make_shared<Command>(std::move(name),
                                                      std::move(description),
-                                                     v2::Parameters::Null(),
+                                                     Parameters::Null(),
                                                      std::move(onExecute),
                                                      std::move(onExit),
                                                      shared_from_this());
@@ -190,17 +198,11 @@ namespace cli::v2
         }
 
         // Same as match command but parses parameters into their value
-        //size_t PrepareCommand(std::ostream& out, const std::vector<std::string>& tokens, size_t currentIndex);
-
-        // Same as match command but parses parameters into their value
         PreparationResult Prepare(ParamContext& paramContext,
                                   const std::vector<std::string>& tokens,
                                   size_t currentIndex);
 
-        using ScanResult = std::pair<std::vector<std::shared_ptr<const Command>>, ScanResult>;
         ExecutionResult ExecuteRecursive(std::ostream& out, const std::vector<std::string>& cmdLineTokens);
-
-        //CompletionResults AutoComplete(ParamContext& ctx, const std::vector<std::string>& cmdLineTokens);
 
         // Filter for ones that start with token, or all if token is ""
         CompletionResults GetAllChildrenCompletions(const std::string& token) const;
@@ -222,6 +224,9 @@ namespace cli::v2
         // Returns ParamContext containing parameters from all parents
         ParamContext BuildParamContext(std::ostream& out) const;
 
+        // Returns every parent in order from eldest to youngest.  In other words: command scope, in-order
+        std::vector<CommandPtr> GetAllCommands() const;
+
     private:
         std::string m_name;
         std::string m_desc;
@@ -233,20 +238,30 @@ namespace cli::v2
         std::shared_ptr<Command> m_parent;
         std::vector<std::shared_ptr<Command>> m_children;
     };
+
+    using ConstCommands = std::vector<Command::CommandPtr>;
+
+    template <typename T>
+    std::optional<T> GetPreviousParamOptional(const ConstCommands& commands, size_t skip = 0)
+    {
+        for (auto iter = commands.rbegin(); iter != commands.rend(); ++iter)
+        {
+            const auto& parameters = (*iter)->GetParameters();
+            if (auto param = ParamContext::StaticPreviousParam<T>(parameters.GetParams(), skip))
+            {
+                return param;
+            }
+        }
+        return {};
+    }
+
+    // Checked version
+    template <typename T>
+    T GetPreviousParam(const ConstCommands& commands, size_t skip = 0)
+    {
+        auto optionalResult = GetPreviousParamOptional<T>(commands, skip);
+        // It's usually expected certain params have come in parent commands
+        assert(optionalResult);
+        return *optionalResult;
+    }
 }
-
-
-#if 0
-{
-	using namespace cli::v2;
-	auto v2Params = Parameters(
-		{
-		std::make_shared<FloatParam>("first", 5.0f),
-		std::make_shared<ObjectIdParam>("second", MechSim::MakeObjectId(1,2,3,4))
-		});
-
-	auto [first, second] = v2Params.GetParams<float, MechSim::ObjectId>();
-	::OutputDebugStringA((std::string("Param 0: ") + std::to_string(first)).c_str());
-	::OutputDebugStringA((std::string("Param 1: ") + second.ToString()).c_str());
-	}
-#endif

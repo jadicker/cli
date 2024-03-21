@@ -35,7 +35,6 @@
 #include "autocomplete.h"
 #include "terminal.h"
 #include "inputdevice.h"
-//#include "../cli.h" // CliSession
 #include "commonprefix.h"
 #include "../cliSession2.h"
 
@@ -49,8 +48,6 @@ class InputHandler
     friend class ::ConsoleTestRunner;
 
 public:
-    using CliSession = cli::v2::CliSession;
-
     InputHandler(CliSession& _session, InputDevice& kb) :
         session(_session),
         terminal(session.GetOutStream())
@@ -136,6 +133,7 @@ private:
     Terminal terminal;
 };
 
+#if 0
 namespace v2
 {
     class InputHandler
@@ -230,6 +228,7 @@ namespace v2
         Terminal terminal;
     };
 }
+#endif
 
 } // namespace detail
 } // namespace cli

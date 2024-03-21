@@ -11,7 +11,7 @@
 
 using namespace cli;
 
-v2::CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
+CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize) :
     cli(_cli),
     coutPtr(Cli::CoutPtr()),
     m_current(cli.RootMenu()),
@@ -28,13 +28,13 @@ v2::CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySiz
         "help",
         "This help message",
         Parameters::Null(),
-        [this](std::ostream&, const Parameters&) { Help(); });
+        [this](std::ostream&, const auto&) { Help(); });
 
     globalScopeMenu->Insert(
         "exit",
         "Quit the session",
         Parameters::Null(),
-        [this](std::ostream&, const Parameters&) { Exit(); });
+        [this](std::ostream&, const auto&) { Exit(); });
 
     m_exitCommand = globalScopeMenu->FindChildCommand("exit");
 
@@ -47,7 +47,7 @@ v2::CliSession::CliSession(Cli& _cli, std::ostream& _out, std::size_t historySiz
 #endif
 }
 
-std::ostream& v2::CliSession::GetOutStream()
+std::ostream& CliSession::GetOutStream()
 {
     if (m_silent)
     {
@@ -56,7 +56,7 @@ std::ostream& v2::CliSession::GetOutStream()
     return out;
 }
 
-bool v2::CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCmd, bool silentOutput)
+bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCmd, bool silentOutput)
 {
     bool silence = m_silent;
     MechSim::ScopedLambda silentScope(
@@ -72,9 +72,11 @@ bool v2::CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool pri
             m_silent = silence;
         });
 
+    auto& out = GetOutStream();
+
     if (printCmd)
     {
-        GetOutStream() << cmd << "\n";
+        out << cmd << "\n";
     }
 
     auto currentCommand = m_current;
@@ -90,31 +92,31 @@ bool v2::CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool pri
 
     try
     {
-        auto result = m_current->ExecuteRecursive(GetOutStream(), strs);
+        auto result = m_current->ExecuteRecursive(out, strs);
 
         if (result.m_action == ScanResult::NoneFound)
         {
-            result = cli.rootMenu->ExecuteRecursive(GetOutStream(), strs);
+            result = cli.rootMenu->ExecuteRecursive(out, strs);
         }
 
         if (result.m_action == ScanResult::NoneFound)
         {
-            result = globalScopeMenu->ExecuteRecursive(GetOutStream(), strs);
+            result = globalScopeMenu->ExecuteRecursive(out, strs);
         }
 
-        if (result.m_action != ScanResult::Found)
+        if (result.m_action != ScanResult::Found && result.m_action != ScanResult::PartialCompletion)
         {
             if (result.m_action == ScanResult::NoneFound)
             {
-                GetOutStream() << Style::Error("Command '")
+                out << Style::Error("Command '")
                     << Style::Command() << strs[0] << reset
                     << Style::Error("' not found.") << std::endl;
             }
             else
             {
                 // Bad parameters
-                GetOutStream() << "Bad parameters, cannot execute commands." << std::endl;
-                result.m_commandsScanned.back()->Help(GetOutStream());
+                out << "Bad parameters, cannot execute commands." << std::endl;
+                result.m_commandsScanned.back()->Help(out);
             }
             // Overloads not allowed
         }
@@ -161,21 +163,28 @@ bool v2::CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool pri
 
             if (!endedInFreeCommand && strs.size() > usedParams)
             {
-                GetOutStream() << Style::Error("Couldn't find command '" + strs[usedParams] + "'.")
-                    << "  Discarding remainder of command line: '";
-                for (size_t i = usedParams; i < strs.size(); ++i)
+                if (!result.m_partialCommand)
                 {
-                    GetOutStream() << strs[i];
-                    if (i < strs.size() - 1)
+                    out << Style::Error("Couldn't find command '" + strs[usedParams] + "'.")
+                                   << "  Discarding remainder of command line: '";
+                    for (size_t i = usedParams; i < strs.size(); ++i)
                     {
-                        GetOutStream() << " ";
+                        out << strs[i];
+                        if (i < strs.size() - 1)
+                        {
+                            out << " ";
+                        }
                     }
+                    out << "'." << std::endl;
                 }
-                GetOutStream() << "'." << std::endl;
+                else
+                {
+                    // TODO: Should there be output here?
+                }
             }
         }
 
-        return result.m_action == ScanResult::Found;
+        return result.m_action == ScanResult::Found || result.m_action == ScanResult::PartialCompletion;
     }
     catch (const std::exception& e)
     {
@@ -191,7 +200,7 @@ bool v2::CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool pri
     return false;
 }
 
-void v2::CliSession::RunProgram(const std::string& name, const std::vector<std::string>& program)
+void CliSession::RunProgram(const std::string& name, const std::vector<std::string>& program)
 {
     GetOutStream() << "Executing program " << name << "...\n";
 
@@ -202,7 +211,7 @@ void v2::CliSession::RunProgram(const std::string& name, const std::vector<std::
     }
 }
 
-size_t v2::CliSession::PromptImpl()
+size_t CliSession::PromptImpl()
 {
     if (exit || !m_current) return 0;
 
@@ -236,14 +245,14 @@ size_t v2::CliSession::PromptImpl()
     return suffixChars;
 }
 
-void v2::CliSession::Help() const
+void CliSession::Help() const
 {
     out << "Commands available:\n";
     globalScopeMenu->MainHelp(out);
     m_current->MainHelp(out);
 }
 
-void v2::CliSession::Exit()
+void CliSession::Exit()
 {
     m_current->Cleanup();
     m_current = m_current->GetParent();
@@ -261,7 +270,7 @@ void v2::CliSession::Exit()
     exit = true; // prevent the prompt to be shown
 }
 
-v2::CompletionResults v2::CliSession::GetCompletionsForCommand(Command* command,
+CompletionResults CliSession::GetCompletionsForCommand(Command* command,
                                                                const std::string& currentLine,
                                                                const size_t param)
 {
@@ -315,9 +324,9 @@ v2::CompletionResults v2::CliSession::GetCompletionsForCommand(Command* command,
     return completionCommand->AutoCompleteImpl(paramContext, commandParams, relativeParam);
 }
 
-v2::CompletionResults v2::CliSession::GetCompletions(const std::string& currentLine, const size_t param)
+CompletionResults CliSession::GetCompletions(const std::string& currentLine, const size_t param)
 {
-    v2::CompletionResults completions = GetCompletionsForCommand(m_current.get(), currentLine, param);
+    CompletionResults completions = GetCompletionsForCommand(m_current.get(), currentLine, param);
     if (completions.m_completions.empty())
     {
         if (m_rootMenu)
@@ -353,7 +362,7 @@ v2::CompletionResults v2::CliSession::GetCompletions(const std::string& currentL
     return completions;
 }
 
-void v2::CliSession::Pop()
+void CliSession::Pop()
 {
     if (!m_top || !m_current)
     {
