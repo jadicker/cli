@@ -21,6 +21,8 @@ namespace cli
         BadOrMissingParams,
         // Some commands succeeded but there is a partially completed command
         PartialCompletion,
+        // Too many parameters were passed
+        ExtraParams,
     };
 
     struct PreparationResult

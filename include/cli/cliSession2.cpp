@@ -104,7 +104,9 @@ bool CliSession::Feed(const std::string& cmd, bool dontSaveCommand, bool printCm
             result = globalScopeMenu->ExecuteRecursive(out, strs);
         }
 
-        if (result.m_action != ScanResult::Found && result.m_action != ScanResult::PartialCompletion)
+        if (result.m_action != ScanResult::Found &&
+            result.m_action != ScanResult::PartialCompletion &&
+            result.m_action != ScanResult::ExtraParams)
         {
             if (result.m_action == ScanResult::NoneFound)
             {

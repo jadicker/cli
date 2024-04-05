@@ -50,7 +50,7 @@ Parameters::PreparationResults Parameters::Prepare(ParamContext& ctx,
 
         if (m_params[0]->Prepare(ctx, freeString))
         {
-            results.m_prepared = 1;
+            results.m_prepared = paramTokens.size() - currentIndex;
         }
         else
         {

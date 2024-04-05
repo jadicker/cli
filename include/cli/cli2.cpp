@@ -116,6 +116,11 @@ PreparationResult Command::Prepare(ParamContext& paramContext,
 
     size_t tokensPrepared = results.m_prepared + 1;
     ScanResult scanResult = (tokensPrepared == GetTotalTokens()) ? ScanResult::Found : ScanResult::BadOrMissingParams;
+    if (m_params.IsFree() && tokensPrepared > 1)
+    {
+        scanResult = ScanResult::Found;
+    }
+
     return { scanResult, tokensPrepared };
 }
 
@@ -183,11 +188,17 @@ ExecutionResult Command::ExecuteRecursive(std::ostream& out,
             maxTokens += command->GetTotalTokens();
         }
 
-        if (results.m_partialCommand)
+        const bool endedInFreeCommand = !results.m_commandsScanned.empty() && results.m_commandsScanned.back()->IsFreeCommand();
+        if (cmdLineTokens.size() > maxTokens && !endedInFreeCommand)
+        {
+            results.m_action = ScanResult::ExtraParams;
+        }
+        else if (results.m_partialCommand)
         {
             results.m_action = ScanResult::PartialCompletion;
         }
-        else if (results.m_paramsConsumed == maxTokens)
+        else if (results.m_paramsConsumed == maxTokens ||
+                (endedInFreeCommand && results.m_paramsConsumed >= maxTokens))
         {
             results.m_action = ScanResult::Found;
         }
