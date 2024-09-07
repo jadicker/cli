@@ -9,6 +9,7 @@
 #include <MechSim/Misc/ObjectId.h>
 
 #include <any>
+#include <cassert>
 #include <numeric>
 #include <tuple>
 #include <type_traits>
