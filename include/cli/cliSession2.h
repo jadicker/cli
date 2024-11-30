@@ -14,6 +14,7 @@
 #include <memory>
 
 class ConsoleTestRunner;
+class TerminalTests;
 
 namespace cli
 {
@@ -165,6 +166,7 @@ namespace cli
     class CliSession
     {
         friend class ConsoleTestRunner;
+		friend class ::TerminalTests;
 
     public:
         CliSession(Cli& _cli, std::ostream& _out, std::size_t historySize = 100);
@@ -256,8 +258,9 @@ namespace cli
 
         void ResetCompletions() { m_menuParamIndex = 0; }
 
-    private:
         virtual void SetPromptSize(size_t size) {}
+
+    private:
         size_t PromptImpl();
 
         CompletionResults GetCompletionsForCommand(Command* command,

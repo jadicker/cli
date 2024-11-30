@@ -46,6 +46,7 @@ class CliLocalTerminalSession : public CliSession
 {
 public:
     friend class ::ConsoleTestRunner;
+	friend class ::TerminalTests;
 
     /**
      * @brief Construct a new Cli Local Terminal Session object that uses the specified @c std::ostream
@@ -64,11 +65,12 @@ public:
         Prompt();
     }
 
-private:
     void SetPromptSize(size_t size) override
     {
         m_inputHandler.SetPromptSize(size);
     }
+
+private:
 
     detail::Keyboard m_keyboard;
     detail::InputHandler m_inputHandler;

@@ -34,6 +34,7 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#include <sstream>
 
 #include <cli/detail/split.h>
 #include "../colorprofile.h"
@@ -41,6 +42,7 @@
 #include "autocomplete.h"
 
 class ConsoleTestRunner;
+class TerminalTests;
 
 namespace cli
 {
@@ -77,7 +79,7 @@ public:
 class Terminal
 {
     friend class ParamList;
-    friend class ::ConsoleTestRunner;
+    friend class TerminalTests;
 
 public:
     explicit Terminal(std::ostream& _out) : out(&_out) {}

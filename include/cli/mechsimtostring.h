@@ -22,15 +22,18 @@ namespace cli
         return os;
     }
 
+	/*
     inline std::ostream& operator<<(std::ostream& os, const MechSim::Object& object)
     {
         os << cli::Style::Object() << object.GetClass() << cli::reset << " " << object.GetId() << cli::reset;
         return os;
     }
+    */
 
-    inline std::ostream& operator<<(std::ostream& os, const MechSim::ObjectHandleAny& object)
+    inline std::ostream& operator<<(std::ostream& os, const MechSim::ObjectHandleAny& handle)
     {
-        os << *object.Get<MechSim::Object>();
+		const auto* object = handle.Get<MechSim::Object>();
+        os << *object;
         return os;
     }
 
