@@ -203,9 +203,9 @@ namespace cli
         /**
          * @brief Get a global out stream object that can be used to print on every session currently connected (local and remote)
          * 
-         * @return OutStream& the reference to the global out stream writing on every session console. 
+         * @return TerminalOutStream& the reference to the global out stream writing on every session console.
          */
-        static OutStream& cout()
+        static TerminalOutStream& cout()
         {
             return *CoutPtr();
         }
@@ -213,9 +213,9 @@ namespace cli
     private:
         friend class CliSession;
 
-        static std::shared_ptr<OutStream> CoutPtr()
+        static std::shared_ptr<TerminalOutStream> CoutPtr()
         {
-            static std::shared_ptr<OutStream> s = std::make_shared<OutStream>();
+            static std::shared_ptr<TerminalOutStream> s = std::make_shared<TerminalOutStream>();
             return s;
         }
 

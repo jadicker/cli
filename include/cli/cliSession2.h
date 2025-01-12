@@ -114,7 +114,7 @@ namespace cli
         /**
          * @brief Get a global out stream object that can be used to print on every session currently connected (local and remote)
          *
-         * @return OutStream& the reference to the global out stream writing on every session console.
+         * @return TerminalOutStream& the reference to the global out stream writing on every session console.
          */
         static OutStream& cout()
         {

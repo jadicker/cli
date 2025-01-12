@@ -73,7 +73,7 @@ protected:
         //std::string msg{ "\x0FF\x0FD\x027", 3 };
         //waitAck = true;
         //std::string iacDoSuppressGoAhead{ "\x0FF\x0FD\x003", 3 };
-        //this -> OutStream() << iacDoSuppressGoAhead << std::flush;
+        //this -> TerminalOutStream() << iacDoSuppressGoAhead << std::flush;
 
         // https://www.ibm.com/support/knowledgecenter/SSLTBW_1.13.0/com.ibm.zos.r13.hald001/telcmds.htm
 
@@ -91,7 +91,7 @@ protected:
         constexpr char DO = '\x0FD'; // 253
         constexpr char VT100 = '\x030'; // 48
 
-        this -> OutStream() << IAC << DO << VT100 << std::flush;
+        this -> TerminalOutStream() << IAC << DO << VT100 << std::flush;
 */
         //cliSession.Prompt();
     }

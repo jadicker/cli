@@ -8,7 +8,7 @@ namespace cli::detail
 			 << std::string(GetInputPosition(), '\b') << newLine
 			 << afterInput << std::flush;
 
-		// if newLine is shorter then currentLine, we have
+		// if newLine is shorter than currentLine, we have
 		// to clear the rest of the string
 		if (newLine.size() < m_currentLine.size())
 		{
